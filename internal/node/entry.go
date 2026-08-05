@@ -55,7 +55,7 @@ type NodeEntry struct {
 	LastAuthorityLatencyProbeAttempt atomic.Int64
 	LastEgressUpdateAttempt          atomic.Int64
 	LatencyTable                     *LatencyTable // per-domain latency stats; nil if not initialized
-	DestBanTable                     *DestBanTable  // per-domain soft ban; nil if not initialized
+	DestBanTable                     *DestBanTable // per-domain soft ban; nil if not initialized
 	// Outbound instance for this node.
 	Outbound atomic.Pointer[adapter.Outbound]
 }
@@ -339,4 +339,40 @@ func (e *NodeEntry) RecordDestResult(domain string, success bool, threshold int,
 		return
 	}
 	e.DestBanTable.Record(domain, success, threshold, ttl)
+}
+
+// ListDestBans returns a snapshot of dest-ban entries on this node.
+// // safe for concurrent calls
+func (e *NodeEntry) ListDestBans() []DestBanSnapshot {
+	if e == nil || e.DestBanTable == nil {
+		return nil
+	}
+	return e.DestBanTable.List()
+}
+
+// ActiveDestBanCount returns how many domains are currently soft-banned.
+// // safe for concurrent calls
+func (e *NodeEntry) ActiveDestBanCount() int {
+	if e == nil || e.DestBanTable == nil {
+		return 0
+	}
+	return e.DestBanTable.ActiveBanCount()
+}
+
+// SetDestBan forces a soft-ban for domain until now+ttl.
+// // safe for concurrent calls
+func (e *NodeEntry) SetDestBan(domain string, ttl time.Duration) {
+	if e == nil || e.DestBanTable == nil {
+		return
+	}
+	e.DestBanTable.SetBan(domain, ttl)
+}
+
+// ClearDestBan removes dest-ban state for domain. Returns whether an entry existed.
+// // safe for concurrent calls
+func (e *NodeEntry) ClearDestBan(domain string) bool {
+	if e == nil || e.DestBanTable == nil {
+		return false
+	}
+	return e.DestBanTable.Clear(domain)
 }

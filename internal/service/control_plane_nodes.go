@@ -4,6 +4,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Resinat/Resin/internal/netutil"
 	"github.com/Resinat/Resin/internal/node"
 	"github.com/Resinat/Resin/internal/probe"
 	"github.com/Resinat/Resin/internal/subscription"
@@ -254,4 +255,127 @@ func (s *ControlPlaneService) ProbeLatency(hashStr string) (*probe.LatencyProbeR
 		return nil, internal("latency probe failed", err)
 	}
 	return result, nil
+}
+
+// DestBanItem is one dest-ban entry exposed by the control plane API.
+type DestBanItem struct {
+	Domain      string  `json:"domain"`
+	FailCount   uint32  `json:"fail_count"`
+	Active      bool    `json:"active"`
+	BannedUntil *string `json:"banned_until,omitempty"`
+	LastError   string  `json:"last_error,omitempty"`
+	LastFailAt  *string `json:"last_fail_at,omitempty"`
+}
+
+// DestBanListResponse is the GET dest-bans payload.
+type DestBanListResponse struct {
+	NodeHash string        `json:"node_hash"`
+	Items    []DestBanItem `json:"items"`
+}
+
+// CreateDestBanRequest is the POST dest-bans body.
+type CreateDestBanRequest struct {
+	Domain string `json:"domain"`
+	TTL    string `json:"ttl,omitempty"` // Go duration, e.g. "15m"; empty = runtime default
+}
+
+// ListNodeDestBans returns dest-ban entries for a node.
+func (s *ControlPlaneService) ListNodeDestBans(hashStr string) (*DestBanListResponse, error) {
+	h, err := node.ParseHex(hashStr)
+	if err != nil {
+		return nil, invalidArg("node_hash: invalid format")
+	}
+	snaps, ok := s.Pool.ListDestBans(h)
+	if !ok {
+		return nil, notFound("node not found")
+	}
+	items := make([]DestBanItem, 0, len(snaps))
+	for _, snap := range snaps {
+		items = append(items, destBanSnapshotToItem(snap))
+	}
+	return &DestBanListResponse{NodeHash: h.Hex(), Items: items}, nil
+}
+
+// CreateNodeDestBan manually soft-bans a domain on a node.
+func (s *ControlPlaneService) CreateNodeDestBan(hashStr string, req CreateDestBanRequest) (*DestBanItem, error) {
+	h, err := node.ParseHex(hashStr)
+	if err != nil {
+		return nil, invalidArg("node_hash: invalid format")
+	}
+	domain := normalizeDestBanDomain(req.Domain)
+	if domain == "" {
+		return nil, invalidArg("domain: required")
+	}
+	var ttl time.Duration
+	if strings.TrimSpace(req.TTL) != "" {
+		parsed, perr := time.ParseDuration(strings.TrimSpace(req.TTL))
+		if perr != nil || parsed <= 0 {
+			return nil, invalidArg("ttl: must be a positive Go duration (e.g. 15m)")
+		}
+		ttl = parsed
+	}
+	if !s.Pool.SetDestBan(h, domain, ttl) {
+		return nil, notFound("node not found")
+	}
+	snaps, ok := s.Pool.ListDestBans(h)
+	if !ok {
+		return nil, notFound("node not found")
+	}
+	for _, snap := range snaps {
+		if snap.Domain == domain {
+			item := destBanSnapshotToItem(snap)
+			return &item, nil
+		}
+	}
+	return &DestBanItem{Domain: domain, Active: true, FailCount: 1}, nil
+}
+
+// DeleteNodeDestBan clears dest-ban state for domain on a node.
+func (s *ControlPlaneService) DeleteNodeDestBan(hashStr, domainRaw string) error {
+	h, err := node.ParseHex(hashStr)
+	if err != nil {
+		return invalidArg("node_hash: invalid format")
+	}
+	domain := normalizeDestBanDomain(domainRaw)
+	if domain == "" {
+		return invalidArg("domain: required")
+	}
+	cleared, nodeOK := s.Pool.ClearDestBan(h, domain)
+	if !nodeOK {
+		return notFound("node not found")
+	}
+	if !cleared {
+		return notFound("dest ban not found")
+	}
+	return nil
+}
+
+func normalizeDestBanDomain(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return ""
+	}
+	// Prefer eTLD+1 so manual bans match routing ExtractDomain keys.
+	if d := netutil.ExtractDomain(raw); d != "" {
+		return d
+	}
+	return strings.ToLower(raw)
+}
+
+func destBanSnapshotToItem(snap node.DestBanSnapshot) DestBanItem {
+	item := DestBanItem{
+		Domain:    snap.Domain,
+		FailCount: snap.Entry.FailCount,
+		Active:    snap.Active,
+		LastError: snap.Entry.LastError,
+	}
+	if snap.Entry.BannedUntil > 0 {
+		t := time.Unix(0, snap.Entry.BannedUntil).UTC().Format(time.RFC3339Nano)
+		item.BannedUntil = &t
+	}
+	if snap.Entry.LastFailAt > 0 {
+		t := time.Unix(0, snap.Entry.LastFailAt).UTC().Format(time.RFC3339Nano)
+		item.LastFailAt = &t
+	}
+	return item
 }

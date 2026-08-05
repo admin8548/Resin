@@ -642,6 +642,49 @@ func (p *GlobalNodePool) RecordDestResult(hash node.Hash, domain string, success
 	}
 }
 
+// ListDestBans returns dest-ban snapshots for a node. Missing node → ok=false.
+func (p *GlobalNodePool) ListDestBans(hash node.Hash) ([]node.DestBanSnapshot, bool) {
+	entry, ok := p.nodes.Load(hash)
+	if !ok || entry == nil {
+		return nil, false
+	}
+	return entry.ListDestBans(), true
+}
+
+// SetDestBan forces a soft-ban for (node, domain). ttl<=0 uses pool default TTL.
+func (p *GlobalNodePool) SetDestBan(hash node.Hash, domain string, ttl time.Duration) bool {
+	entry, ok := p.nodes.Load(hash)
+	if !ok || entry == nil {
+		return false
+	}
+	if ttl <= 0 {
+		ttl = 15 * time.Minute
+		if p.destBanTTL != nil {
+			ttl = p.destBanTTL()
+		}
+	}
+	wasBanned := entry.IsDestBanned(domain)
+	entry.SetDestBan(domain, ttl)
+	if p.onNodeDynamicChanged != nil && !wasBanned {
+		p.onNodeDynamicChanged(hash)
+	}
+	return true
+}
+
+// ClearDestBan removes dest-ban for (node, domain). Returns (found, nodeExists).
+func (p *GlobalNodePool) ClearDestBan(hash node.Hash, domain string) (cleared bool, nodeOK bool) {
+	entry, ok := p.nodes.Load(hash)
+	if !ok || entry == nil {
+		return false, false
+	}
+	wasBanned := entry.IsDestBanned(domain)
+	cleared = entry.ClearDestBan(domain)
+	if p.onNodeDynamicChanged != nil && (wasBanned || cleared) {
+		p.onNodeDynamicChanged(hash)
+	}
+	return cleared, true
+}
+
 func (p *GlobalNodePool) passiveCircuitBreakerDisabled(platformID string) bool {
 	if platformID == "" {
 		return false

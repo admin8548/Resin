@@ -18,7 +18,15 @@ import { formatDateTime, formatRelativeTime } from "../../lib/time";
 import { listPlatforms } from "../platforms/api";
 import type { Platform } from "../platforms/types";
 import { listSubscriptions } from "../subscriptions/api";
-import { getNode, listNodes, probeEgress, probeLatency } from "./api";
+import {
+  createNodeDestBan,
+  deleteNodeDestBan,
+  getNode,
+  listNodeDestBans,
+  listNodes,
+  probeEgress,
+  probeLatency,
+} from "./api";
 import type { NodeSummary } from "./types";
 import { getAllRegions, getRegionName } from "./regions";
 import type { NodeListFilters, NodeSortBy, SortOrder } from "./types";
@@ -273,6 +281,8 @@ export function NodesPage() {
   const [pageSize, setPageSize] = useState<number>(200);
   const [selectedNodeHash, setSelectedNodeHash] = useState("");
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [destBanDomain, setDestBanDomain] = useState("");
+  const [destBanTTL, setDestBanTTL] = useState("");
   const [pendingEgressHashes, setPendingEgressHashes] = useState<Set<string>>(() => new Set());
   const [pendingLatencyHashes, setPendingLatencyHashes] = useState<Set<string>>(() => new Set());
   const { toasts, showToast, dismissToast } = useToast();
@@ -354,6 +364,12 @@ export function NodesPage() {
   const detailNode = nodeDetailQuery.data ?? selectedNode;
   const drawerVisible = drawerOpen && Boolean(detailNode);
 
+  const destBansQuery = useQuery({
+    queryKey: ["node-dest-bans", selectedHash],
+    queryFn: () => listNodeDestBans(selectedHash),
+    enabled: Boolean(selectedHash) && drawerOpen,
+  });
+
   useEffect(() => {
     if (!drawerVisible) {
       return;
@@ -409,6 +425,40 @@ export function NodesPage() {
     },
     onError: async (error) => {
       await refreshNodes();
+      showToast("error", formatApiErrorMessage(error, t));
+    },
+  });
+
+  const refreshDestBans = async () => {
+    if (!selectedHash) {
+      return;
+    }
+    await queryClient.invalidateQueries({ queryKey: ["node-dest-bans", selectedHash] });
+    await queryClient.invalidateQueries({ queryKey: ["node", selectedHash] });
+    await queryClient.invalidateQueries({ queryKey: ["nodes"] });
+  };
+
+  const createDestBanMutation = useMutation({
+    mutationFn: async (input: { hash: string; domain: string; ttl?: string }) =>
+      createNodeDestBan(input.hash, { domain: input.domain, ttl: input.ttl }),
+    onSuccess: async (item) => {
+      setDestBanDomain("");
+      setDestBanTTL("");
+      await refreshDestBans();
+      showToast("success", t("已屏蔽域名 {{domain}}", { domain: item.domain }));
+    },
+    onError: (error) => {
+      showToast("error", formatApiErrorMessage(error, t));
+    },
+  });
+
+  const deleteDestBanMutation = useMutation({
+    mutationFn: async (input: { hash: string; domain: string }) => deleteNodeDestBan(input.hash, input.domain),
+    onSuccess: async (_void, vars) => {
+      await refreshDestBans();
+      showToast("success", t("已解除屏蔽 {{domain}}", { domain: vars.domain }));
+    },
+    onError: (error) => {
       showToast("error", formatApiErrorMessage(error, t));
     },
   });
@@ -883,6 +933,10 @@ export function NodesPage() {
                     <p>{!detailNode.has_outbound ? "-" : detailNode.failure_count}</p>
                   </div>
                   <div>
+                    <span>{t("域名屏蔽")}</span>
+                    <p>{detailNode.dest_ban_count ?? destBansQuery.data?.items.filter((i) => i.active).length ?? 0}</p>
+                  </div>
+                  <div>
                     <span>{t("状态")}</span>
                     <div>
                       {(() => {
@@ -956,6 +1010,97 @@ export function NodesPage() {
                         <p>{tag.tag}</p>
                         <span>{tag.subscription_name}</span>
                         <code>{tag.subscription_id}</code>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </section>
+
+              <section className="platform-drawer-section">
+                <div className="platform-drawer-section-head">
+                  <h4>{t("目的地屏蔽")}</h4>
+                  <p>{t("仅影响该节点访问对应域名；全局健康状态不变。")}</p>
+                </div>
+
+                <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginBottom: "12px" }}>
+                  <Input
+                    placeholder={t("域名，如 grok.com")}
+                    value={destBanDomain}
+                    onChange={(event) => setDestBanDomain(event.target.value)}
+                    style={{ flex: "1 1 160px", minWidth: "140px" }}
+                  />
+                  <Input
+                    placeholder={t("TTL 可选，如 15m")}
+                    value={destBanTTL}
+                    onChange={(event) => setDestBanTTL(event.target.value)}
+                    style={{ flex: "0 1 120px", minWidth: "100px" }}
+                  />
+                  <Button
+                    variant="secondary"
+                    disabled={!destBanDomain.trim() || createDestBanMutation.isPending}
+                    onClick={() => {
+                      const domain = destBanDomain.trim();
+                      if (!domain || !detailNode.node_hash) {
+                        return;
+                      }
+                      const ttl = destBanTTL.trim();
+                      void createDestBanMutation.mutateAsync({
+                        hash: detailNode.node_hash,
+                        domain,
+                        ttl: ttl || undefined,
+                      });
+                    }}
+                  >
+                    {createDestBanMutation.isPending ? t("提交中...") : t("手动屏蔽")}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => void destBansQuery.refetch()}
+                    disabled={destBansQuery.isFetching}
+                  >
+                    <RefreshCw size={14} className={destBansQuery.isFetching ? "spin" : undefined} />
+                  </Button>
+                </div>
+
+                {destBansQuery.isLoading ? (
+                  <p className="muted">{t("加载屏蔽列表...")}</p>
+                ) : destBansQuery.isError ? (
+                  <div className="callout callout-error">{formatApiErrorMessage(destBansQuery.error, t)}</div>
+                ) : !(destBansQuery.data?.items.length) ? (
+                  <p className="muted">{t("当前无屏蔽域名")}</p>
+                ) : (
+                  <div className="tag-list">
+                    {destBansQuery.data.items.map((item) => (
+                      <div key={item.domain} className="tag-item" style={{ display: "flex", justifyContent: "space-between", gap: "12px", alignItems: "flex-start" }}>
+                        <div style={{ minWidth: 0 }}>
+                          <p style={{ margin: 0, display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                            <code>{item.domain}</code>
+                            {item.active ? (
+                              <Badge variant="warning">{t("屏蔽中")}</Badge>
+                            ) : (
+                              <Badge variant="muted">{t("计数中")}</Badge>
+                            )}
+                          </p>
+                          <span>
+                            {t("失败 {{count}}", { count: item.fail_count })}
+                            {item.banned_until ? ` · ${t("至")} ${formatDateTime(item.banned_until)}` : ""}
+                            {item.last_error ? ` · ${item.last_error}` : ""}
+                          </span>
+                        </div>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          disabled={deleteDestBanMutation.isPending}
+                          onClick={() => {
+                            void deleteDestBanMutation.mutateAsync({
+                              hash: detailNode.node_hash,
+                              domain: item.domain,
+                            });
+                          }}
+                        >
+                          {t("解除")}
+                        </Button>
                       </div>
                     ))}
                   </div>

@@ -211,3 +211,51 @@ func HandleProbeLatency(cp *service.ControlPlaneService) http.HandlerFunc {
 		WriteJSON(w, http.StatusOK, result)
 	}
 }
+
+// HandleListNodeDestBans returns a handler for GET /api/v1/nodes/{hash}/dest-bans.
+func HandleListNodeDestBans(cp *service.ControlPlaneService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		hash := PathParam(r, "hash")
+		result, err := cp.ListNodeDestBans(hash)
+		if err != nil {
+			writeServiceError(w, err)
+			return
+		}
+		WriteJSON(w, http.StatusOK, result)
+	}
+}
+
+// HandleCreateNodeDestBan returns a handler for POST /api/v1/nodes/{hash}/dest-bans.
+func HandleCreateNodeDestBan(cp *service.ControlPlaneService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		hash := PathParam(r, "hash")
+		var req service.CreateDestBanRequest
+		if err := DecodeBody(r, &req); err != nil {
+			writeDecodeBodyError(w, err)
+			return
+		}
+		item, err := cp.CreateNodeDestBan(hash, req)
+		if err != nil {
+			writeServiceError(w, err)
+			return
+		}
+		WriteJSON(w, http.StatusOK, item)
+	}
+}
+
+// HandleDeleteNodeDestBan returns a handler for DELETE /api/v1/nodes/{hash}/dest-bans?domain=.
+func HandleDeleteNodeDestBan(cp *service.ControlPlaneService) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		hash := PathParam(r, "hash")
+		domain := strings.TrimSpace(r.URL.Query().Get("domain"))
+		if domain == "" {
+			WriteError(w, http.StatusBadRequest, "INVALID_ARGUMENT", "domain query parameter is required")
+			return
+		}
+		if err := cp.DeleteNodeDestBan(hash, domain); err != nil {
+			writeServiceError(w, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}
+}

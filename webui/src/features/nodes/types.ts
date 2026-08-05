@@ -13,6 +13,7 @@ export type NodeSummary = {
   last_error?: string;
   circuit_open_since?: string;
   failure_count: number;
+  dest_ban_count?: number;
   egress_ip?: string;
   reference_latency_ms?: number;
   region?: string;
@@ -21,6 +22,20 @@ export type NodeSummary = {
   last_authority_latency_probe_attempt?: string;
   last_egress_update_attempt?: string;
   tags: NodeTag[];
+};
+
+export type DestBanItem = {
+  domain: string;
+  fail_count: number;
+  active: boolean;
+  banned_until?: string;
+  last_error?: string;
+  last_fail_at?: string;
+};
+
+export type DestBanListResponse = {
+  node_hash: string;
+  items: DestBanItem[];
 };
 
 export type PageResponse<T> = {

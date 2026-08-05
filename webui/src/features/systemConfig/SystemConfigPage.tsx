@@ -5,6 +5,7 @@ import { Badge } from "../../components/ui/Badge";
 import { Button } from "../../components/ui/Button";
 import { Card } from "../../components/ui/Card";
 import { Input } from "../../components/ui/Input";
+import { Select } from "../../components/ui/Select";
 import { Switch } from "../../components/ui/Switch";
 import { Textarea } from "../../components/ui/Textarea";
 import { ToastContainer } from "../../components/ui/Toast";
@@ -31,6 +32,11 @@ type RuntimeConfigForm = {
   latency_decay_window: string;
   cache_flush_interval: string;
   cache_flush_dirty_threshold: string;
+  dest_ban_enabled: boolean;
+  dest_ban_threshold: string;
+  dest_ban_ttl: string;
+  dest_ban_scope: string;
+  dest_ban_max_entries: string;
 };
 
 const EDITABLE_FIELDS: Array<keyof RuntimeConfig> = [
@@ -50,6 +56,11 @@ const EDITABLE_FIELDS: Array<keyof RuntimeConfig> = [
   "latency_decay_window",
   "cache_flush_interval",
   "cache_flush_dirty_threshold",
+  "dest_ban_enabled",
+  "dest_ban_threshold",
+  "dest_ban_ttl",
+  "dest_ban_scope",
+  "dest_ban_max_entries",
 ];
 
 const FIELD_LABELS: Record<keyof RuntimeConfig, string> = {
@@ -69,6 +80,11 @@ const FIELD_LABELS: Record<keyof RuntimeConfig, string> = {
   latency_decay_window: "历史延迟衰减窗口",
   cache_flush_interval: "缓存异步刷盘间隔",
   cache_flush_dirty_threshold: "缓存刷盘脏阈值",
+  dest_ban_enabled: "启用目的地软屏蔽",
+  dest_ban_threshold: "目的地屏蔽失败阈值",
+  dest_ban_ttl: "目的地屏蔽时长",
+  dest_ban_scope: "目的地屏蔽粒度",
+  dest_ban_max_entries: "每节点屏蔽表容量",
 };
 
 const ALLOCATION_POLICY_LABELS: Record<string, string> = {
@@ -106,6 +122,11 @@ function configToForm(config: RuntimeConfig): RuntimeConfigForm {
     latency_decay_window: config.latency_decay_window,
     cache_flush_interval: config.cache_flush_interval,
     cache_flush_dirty_threshold: String(config.cache_flush_dirty_threshold),
+    dest_ban_enabled: config.dest_ban_enabled,
+    dest_ban_threshold: String(config.dest_ban_threshold),
+    dest_ban_ttl: config.dest_ban_ttl,
+    dest_ban_scope: config.dest_ban_scope || "etld1",
+    dest_ban_max_entries: String(config.dest_ban_max_entries),
   };
 }
 
@@ -180,6 +201,17 @@ function parseForm(form: RuntimeConfigForm): RuntimeConfig {
     latency_decay_window: parseDurationField("历史延迟衰减窗口", form.latency_decay_window),
     cache_flush_interval: parseDurationField("缓存异步刷盘间隔", form.cache_flush_interval),
     cache_flush_dirty_threshold: parseNonNegativeInt("缓存刷盘脏阈值", form.cache_flush_dirty_threshold),
+    dest_ban_enabled: form.dest_ban_enabled,
+    dest_ban_threshold: parseNonNegativeInt("目的地屏蔽失败阈值", form.dest_ban_threshold),
+    dest_ban_ttl: parseDurationField("目的地屏蔽时长", form.dest_ban_ttl),
+    dest_ban_scope: (() => {
+      const scope = form.dest_ban_scope.trim().toLowerCase();
+      if (scope !== "etld1" && scope !== "host") {
+        throw new Error("目的地屏蔽粒度必须是 etld1 或 host");
+      }
+      return scope;
+    })(),
+    dest_ban_max_entries: parseNonNegativeInt("每节点屏蔽表容量", form.dest_ban_max_entries),
   };
 }
 
@@ -473,6 +505,102 @@ export function SystemConfigPage() {
                       min={0}
                       value={form.max_consecutive_failures}
                       onChange={(event) => setFormField("max_consecutive_failures", event.target.value)}
+                    />
+                  </div>
+                </div>
+              </section>
+
+              <section className="syscfg-section">
+                <h4>{t("目的地软屏蔽 (DestBan)")}</h4>
+                <p className="muted" style={{ marginTop: 0, marginBottom: "12px" }}>
+                  {t("按「节点 × 域名」隔离 connect 失败，不抬全局熔断。节点详情可查看/手动 ban。")}
+                </p>
+                <div
+                  className="syscfg-checkbox-grid"
+                  style={{ display: "grid", gridTemplateColumns: "1fr", gap: "16px", marginBottom: "16px" }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      background: "var(--surface-sunken, rgba(0,0,0,0.02))",
+                      padding: "12px 16px",
+                      borderRadius: "8px",
+                      border: "1px solid var(--border)",
+                    }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center" }}>
+                      <span className="field-label" style={{ margin: 0, fontWeight: 500 }}>
+                        {t("启用目的地软屏蔽")}
+                      </span>
+                      {renderRestoreButton("dest_ban_enabled")}
+                    </div>
+                    <Switch
+                      checked={form.dest_ban_enabled}
+                      onChange={(event) => setFormField("dest_ban_enabled", event.target.checked)}
+                    />
+                  </div>
+                </div>
+                <div className="form-grid">
+                  <div className="field-group">
+                    <div style={{ display: "flex", alignItems: "center" }}>
+                      <label className="field-label" htmlFor="sys-dest-ban-threshold" style={{ margin: 0 }}>
+                        {t("目的地屏蔽失败阈值")}
+                      </label>
+                      {renderRestoreButton("dest_ban_threshold")}
+                    </div>
+                    <Input
+                      id="sys-dest-ban-threshold"
+                      type="number"
+                      min={0}
+                      value={form.dest_ban_threshold}
+                      onChange={(event) => setFormField("dest_ban_threshold", event.target.value)}
+                    />
+                  </div>
+                  <div className="field-group">
+                    <div style={{ display: "flex", alignItems: "center" }}>
+                      <label className="field-label" htmlFor="sys-dest-ban-ttl" style={{ margin: 0 }}>
+                        {t("目的地屏蔽时长")}
+                      </label>
+                      {renderRestoreButton("dest_ban_ttl")}
+                    </div>
+                    <Input
+                      id="sys-dest-ban-ttl"
+                      value={form.dest_ban_ttl}
+                      onChange={(event) => setFormField("dest_ban_ttl", event.target.value)}
+                      placeholder="15m"
+                    />
+                  </div>
+                  <div className="field-group">
+                    <div style={{ display: "flex", alignItems: "center" }}>
+                      <label className="field-label" htmlFor="sys-dest-ban-scope" style={{ margin: 0 }}>
+                        {t("目的地屏蔽粒度")}
+                      </label>
+                      {renderRestoreButton("dest_ban_scope")}
+                    </div>
+                    <Select
+                      id="sys-dest-ban-scope"
+                      value={form.dest_ban_scope}
+                      onChange={(event) => setFormField("dest_ban_scope", event.target.value)}
+                    >
+                      <option value="etld1">{t("eTLD+1（推荐）")}</option>
+                      <option value="host">{t("完整 Host")}</option>
+                    </Select>
+                  </div>
+                  <div className="field-group">
+                    <div style={{ display: "flex", alignItems: "center" }}>
+                      <label className="field-label" htmlFor="sys-dest-ban-max" style={{ margin: 0 }}>
+                        {t("每节点屏蔽表容量")}
+                      </label>
+                      {renderRestoreButton("dest_ban_max_entries")}
+                    </div>
+                    <Input
+                      id="sys-dest-ban-max"
+                      type="number"
+                      min={0}
+                      value={form.dest_ban_max_entries}
+                      onChange={(event) => setFormField("dest_ban_max_entries", event.target.value)}
                     />
                   </div>
                 </div>

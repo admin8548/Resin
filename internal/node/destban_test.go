@@ -58,3 +58,30 @@ func TestNodeEntry_IsDestBanned(t *testing.T) {
 		t.Fatal("expected ban after threshold=1 failure")
 	}
 }
+
+func TestDestBanTable_SetBanAndClear(t *testing.T) {
+	tbl := NewDestBanTable(8)
+	if tbl.IsBanned("grok.com") {
+		t.Fatal("expected not banned initially")
+	}
+	tbl.SetBan("grok.com", time.Minute)
+	if !tbl.IsBanned("grok.com") {
+		t.Fatal("expected banned after SetBan")
+	}
+	if tbl.ActiveBanCount() != 1 {
+		t.Fatalf("ActiveBanCount=%d want 1", tbl.ActiveBanCount())
+	}
+	list := tbl.List()
+	if len(list) != 1 || list[0].Domain != "grok.com" || !list[0].Active {
+		t.Fatalf("List unexpected: %+v", list)
+	}
+	if !tbl.Clear("grok.com") {
+		t.Fatal("Clear should return true")
+	}
+	if tbl.IsBanned("grok.com") {
+		t.Fatal("expected cleared")
+	}
+	if tbl.Clear("grok.com") {
+		t.Fatal("second Clear should be false")
+	}
+}

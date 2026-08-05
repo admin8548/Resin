@@ -20,6 +20,11 @@ const DEFAULT_CONFIG: RuntimeConfig = {
   latency_decay_window: "",
   cache_flush_interval: "",
   cache_flush_dirty_threshold: 0,
+  dest_ban_enabled: true,
+  dest_ban_threshold: 2,
+  dest_ban_ttl: "15m0s",
+  dest_ban_scope: "etld1",
+  dest_ban_max_entries: 500,
 };
 
 function asNumber(raw: unknown, fallback: number): number {
@@ -79,6 +84,11 @@ function normalizeRuntimeConfig(raw: Partial<RuntimeConfig> | null | undefined):
       raw.cache_flush_dirty_threshold,
       DEFAULT_CONFIG.cache_flush_dirty_threshold,
     ),
+    dest_ban_enabled: raw.dest_ban_enabled === undefined ? DEFAULT_CONFIG.dest_ban_enabled : Boolean(raw.dest_ban_enabled),
+    dest_ban_threshold: asNumber(raw.dest_ban_threshold, DEFAULT_CONFIG.dest_ban_threshold),
+    dest_ban_ttl: asString(raw.dest_ban_ttl, DEFAULT_CONFIG.dest_ban_ttl),
+    dest_ban_scope: asString(raw.dest_ban_scope, DEFAULT_CONFIG.dest_ban_scope),
+    dest_ban_max_entries: asNumber(raw.dest_ban_max_entries, DEFAULT_CONFIG.dest_ban_max_entries),
   };
 }
 

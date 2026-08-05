@@ -1,5 +1,7 @@
 import { apiRequest } from "../../lib/api-client";
 import type {
+  DestBanItem,
+  DestBanListResponse,
   EgressProbeResult,
   LatencyProbeResult,
   NodeListQuery,
@@ -106,5 +108,30 @@ export async function probeEgress(hash: string): Promise<EgressProbeResult> {
 export async function probeLatency(hash: string): Promise<LatencyProbeResult> {
   return apiRequest<LatencyProbeResult>(`${basePath}/${hash}/actions/probe-latency`, {
     method: "POST",
+  });
+}
+
+export async function listNodeDestBans(hash: string): Promise<DestBanListResponse> {
+  const data = await apiRequest<DestBanListResponse>(`${basePath}/${encodeURIComponent(hash)}/dest-bans`);
+  return {
+    node_hash: data.node_hash,
+    items: Array.isArray(data.items) ? data.items : [],
+  };
+}
+
+export async function createNodeDestBan(
+  hash: string,
+  body: { domain: string; ttl?: string },
+): Promise<DestBanItem> {
+  return apiRequest<DestBanItem>(`${basePath}/${encodeURIComponent(hash)}/dest-bans`, {
+    method: "POST",
+    body,
+  });
+}
+
+export async function deleteNodeDestBan(hash: string, domain: string): Promise<void> {
+  const query = new URLSearchParams({ domain });
+  await apiRequest<void>(`${basePath}/${encodeURIComponent(hash)}/dest-bans?${query.toString()}`, {
+    method: "DELETE",
   });
 }

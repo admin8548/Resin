@@ -15,6 +15,11 @@ export type RuntimeConfig = {
   latency_decay_window: string;
   cache_flush_interval: string;
   cache_flush_dirty_threshold: number;
+  dest_ban_enabled: boolean;
+  dest_ban_threshold: number;
+  dest_ban_ttl: string;
+  dest_ban_scope: string;
+  dest_ban_max_entries: number;
 };
 
 export type EnvConfig = {

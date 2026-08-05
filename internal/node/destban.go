@@ -134,6 +134,124 @@ func (t *DestBanTable) Size() int {
 	return n
 }
 
+// ActiveBanCount returns how many entries are currently soft-banned (not expired).
+// // safe for concurrent calls
+func (t *DestBanTable) ActiveBanCount() int {
+	if t == nil {
+		return 0
+	}
+	nowNs := time.Now().UnixNano()
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	n := 0
+	for i := range t.slots {
+		if !t.slots[i].occupied {
+			continue
+		}
+		until := t.slots[i].entry.BannedUntil
+		if until > nowNs {
+			n++
+			continue
+		}
+		if until > 0 {
+			t.slots[i].occupied = false
+		}
+	}
+	return n
+}
+
+// List returns a snapshot of occupied entries. Expired bans are dropped.
+// // safe for concurrent calls
+func (t *DestBanTable) List() []DestBanSnapshot {
+	if t == nil {
+		return nil
+	}
+	nowNs := time.Now().UnixNano()
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	out := make([]DestBanSnapshot, 0, 8)
+	for i := range t.slots {
+		if !t.slots[i].occupied {
+			continue
+		}
+		e := t.slots[i].entry
+		if e.BannedUntil > 0 && e.BannedUntil <= nowNs {
+			t.slots[i].occupied = false
+			continue
+		}
+		out = append(out, DestBanSnapshot{
+			Domain:       t.slots[i].domain,
+			Entry:        e,
+			Active:       e.BannedUntil > nowNs,
+			LastAccessNs: t.slots[i].lastAccessNs,
+		})
+	}
+	return out
+}
+
+// DestBanSnapshot is a read-only view of one dest-ban slot.
+type DestBanSnapshot struct {
+	Domain       string
+	Entry        DestBanEntry
+	Active       bool
+	LastAccessNs int64
+}
+
+// SetBan forces a soft-ban for domain until now+ttl.
+// // safe for concurrent calls
+func (t *DestBanTable) SetBan(domain string, ttl time.Duration) {
+	if t == nil || domain == "" {
+		return
+	}
+	if ttl <= 0 {
+		ttl = 15 * time.Minute
+	}
+	key := domainKey(domain)
+	nowNs := time.Now().UnixNano()
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	idx, found := t.findLocked(key)
+	if !found {
+		idx = t.pickSlotLocked()
+		t.slots[idx] = destBanSlot{
+			key:          key,
+			domain:       domain,
+			occupied:     true,
+			lastAccessNs: nowNs,
+		}
+	}
+	e := &t.slots[idx].entry
+	if e.FailCount == 0 {
+		e.FailCount = 1
+	}
+	e.BannedUntil = nowNs + ttl.Nanoseconds()
+	e.LastFailAt = nowNs
+	if e.LastError == "" {
+		e.LastError = "MANUAL_BAN"
+	}
+	t.slots[idx].domain = domain
+	t.slots[idx].lastAccessNs = nowNs
+	t.slots[idx].occupied = true
+}
+
+// Clear removes the dest-ban / failure counter for domain.
+// Returns true when an entry was present.
+// // safe for concurrent calls
+func (t *DestBanTable) Clear(domain string) bool {
+	if t == nil || domain == "" {
+		return false
+	}
+	key := domainKey(domain)
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	idx, found := t.findLocked(key)
+	if !found {
+		return false
+	}
+	t.slots[idx].occupied = false
+	return true
+}
+
 // Range iterates active entries. Returning false from fn stops iteration.
 // Snapshot is taken under lock; fn runs under lock too (keep fn lightweight).
 // // safe for concurrent calls
