@@ -89,6 +89,11 @@ var runtimeConfigAllowedFields = map[string]bool{
 	"latency_decay_window":                     true,
 	"cache_flush_interval":                     true,
 	"cache_flush_dirty_threshold":              true,
+	"dest_ban_enabled":                         true,
+	"dest_ban_threshold":                       true,
+	"dest_ban_ttl":                             true,
+	"dest_ban_scope":                           true,
+	"dest_ban_max_entries":                     true,
 }
 
 var platformPatchAllowedFields = map[string]bool{
@@ -238,6 +243,22 @@ func validateRuntimeConfig(cfg *config.RuntimeConfig) *ServiceError {
 	minCacheFlushInterval := 5 * time.Second
 	if time.Duration(cfg.CacheFlushInterval) < minCacheFlushInterval {
 		return invalidArg("cache_flush_interval: must be >= 5s")
+	}
+	if cfg.DestBanThreshold < 0 {
+		return invalidArg("dest_ban_threshold: must be non-negative")
+	}
+	if cfg.DestBanMaxEntries < 0 {
+		return invalidArg("dest_ban_max_entries: must be non-negative")
+	}
+	if cfg.DestBanTTL < 0 {
+		return invalidArg("dest_ban_ttl: must be non-negative")
+	}
+	scope := strings.ToLower(strings.TrimSpace(cfg.DestBanScope))
+	if scope != "" && scope != "etld1" && scope != "host" {
+		return invalidArg(`dest_ban_scope: must be "etld1" or "host"`)
+	}
+	if scope != "" {
+		cfg.DestBanScope = scope
 	}
 
 	// LatencyTestURL domain must be in LatencyAuthorities.

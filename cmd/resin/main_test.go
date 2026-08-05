@@ -637,7 +637,7 @@ func TestBootstrapNodes_MissingDynamicDefaultsCircuitOpen(t *testing.T) {
 	}
 
 	outboundMgr := outbound.NewOutboundManager(pool, &testutil.StubOutboundBuilder{})
-	if err := bootstrapNodes(engine, pool, subManager, outboundMgr, envCfg, runtimeCfg.LatencyAuthorities); err != nil {
+	if err := bootstrapNodes(engine, pool, subManager, outboundMgr, envCfg, runtimeCfg.LatencyAuthorities, runtimeCfg.DestBanMaxEntries); err != nil {
 		t.Fatalf("bootstrapNodes: %v", err)
 	}
 
@@ -709,7 +709,7 @@ func TestBootstrapNodes_DynamicRecordOverridesDefaultCircuitOpen(t *testing.T) {
 	}
 
 	outboundMgr := outbound.NewOutboundManager(pool, &testutil.StubOutboundBuilder{})
-	if err := bootstrapNodes(engine, pool, subManager, outboundMgr, envCfg, runtimeCfg.LatencyAuthorities); err != nil {
+	if err := bootstrapNodes(engine, pool, subManager, outboundMgr, envCfg, runtimeCfg.LatencyAuthorities, runtimeCfg.DestBanMaxEntries); err != nil {
 		t.Fatalf("bootstrapNodes: %v", err)
 	}
 
@@ -765,7 +765,7 @@ func TestBootstrapNodes_RestoreEvictedSubscriptionNodeWithoutPoolRef(t *testing.
 	}
 
 	outboundMgr := outbound.NewOutboundManager(pool, &testutil.StubOutboundBuilder{})
-	if err := bootstrapNodes(engine, pool, subManager, outboundMgr, envCfg, runtimeCfg.LatencyAuthorities); err != nil {
+	if err := bootstrapNodes(engine, pool, subManager, outboundMgr, envCfg, runtimeCfg.LatencyAuthorities, runtimeCfg.DestBanMaxEntries); err != nil {
 		t.Fatalf("bootstrapNodes: %v", err)
 	}
 
@@ -847,7 +847,7 @@ func TestBootstrapNodes_TrimRegularLatencyKeepsAuthorities(t *testing.T) {
 	}
 
 	outboundMgr := outbound.NewOutboundManager(pool, &testutil.StubOutboundBuilder{})
-	if err := bootstrapNodes(engine, pool, subManager, outboundMgr, envCfg, runtimeCfg.LatencyAuthorities); err != nil {
+	if err := bootstrapNodes(engine, pool, subManager, outboundMgr, envCfg, runtimeCfg.LatencyAuthorities, runtimeCfg.DestBanMaxEntries); err != nil {
 		t.Fatalf("bootstrapNodes: %v", err)
 	}
 
@@ -915,7 +915,7 @@ func TestMarkNodeRemovedDirty_DeletesStaticDynamicAndLatency(t *testing.T) {
 	hash := node.HashFromRawOptions(raw)
 	hashHex := hash.Hex()
 
-	entry := node.NewNodeEntry(hash, raw, time.Now(), 16)
+	entry := node.NewNodeEntry(hash, raw, time.Now(), 16, 100)
 	entry.FailureCount.Store(2)
 	entry.CircuitOpenSince.Store(time.Now().Add(-time.Minute).UnixNano())
 	entry.SetEgressIP(netip.MustParseAddr("203.0.113.50"))

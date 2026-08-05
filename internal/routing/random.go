@@ -11,6 +11,7 @@ import (
 )
 
 var ErrNoAvailableNodes = errors.New("no available nodes")
+var ErrNoNodeForDest = errors.New("no node available for target domain")
 
 var randomRouteRNGPool = sync.Pool{
 	New: func() any {
@@ -40,17 +41,44 @@ func randomRoute(
 	rng := randomRouteRNGPool.Get().(*rand.Rand)
 	defer randomRouteRNGPool.Put(rng)
 
+	isBanned := func(h node.Hash) bool {
+		if targetDomain == "" {
+			return false
+		}
+		entry, ok := pool.GetEntry(h)
+		return ok && entry.IsDestBanned(targetDomain)
+	}
+
+	// Random pick that hard-excludes dest-banned nodes.
+	// Attempts scale with view size but are capped to keep hot-path bounded.
+	maxAttempts := size * 3
+	if maxAttempts < 4 {
+		maxAttempts = 4
+	}
+	if maxAttempts > 32 {
+		maxAttempts = 32
+	}
 	pick := func() (node.Hash, bool) {
-		return view.RandomPick(rng)
+		for i := 0; i < maxAttempts; i++ {
+			h, ok := view.RandomPick(rng)
+			if !ok {
+				return node.Zero, false
+			}
+			if !isBanned(h) {
+				return h, true
+			}
+		}
+		return node.Zero, false
 	}
 
 	// Pick 1st candidate.
 	h1, ok1 := pick()
 	if !ok1 {
-		return node.Zero, ErrNoAvailableNodes
+		// Distinguish empty view (already handled) from all-banned.
+		return node.Zero, ErrNoNodeForDest
 	}
 
-	// If view has one node, use it directly.
+	// If view has one node, use it directly (already verified non-banned).
 	if size == 1 {
 		return h1, nil
 	}

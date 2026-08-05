@@ -12,7 +12,7 @@ import (
 
 // makeFullyRoutableEntry creates a NodeEntry that passes all 5 filter conditions.
 func makeFullyRoutableEntry(hash node.Hash, subIDs ...string) *node.NodeEntry {
-	e := node.NewNodeEntry(hash, nil, time.Now(), 16)
+	e := node.NewNodeEntry(hash, nil, time.Now(), 16, 100)
 	for _, id := range subIDs {
 		e.AddSubscriptionID(id)
 	}
@@ -66,7 +66,7 @@ func TestPlatform_EvaluateNode_NoLatency(t *testing.T) {
 	p := NewPlatform("p1", "Test", nil, nil)
 	h := makeHash(`{"type":"ss"}`)
 	// Create entry without latency table (maxLatencyTableEntries=0).
-	entry := node.NewNodeEntry(h, nil, time.Now(), 0)
+	entry := node.NewNodeEntry(h, nil, time.Now(), 0, 100)
 	entry.AddSubscriptionID("sub1")
 	ob := testutil.NewNoopOutbound()
 	entry.Outbound.Store(&ob)

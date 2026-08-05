@@ -440,7 +440,7 @@ func TestCreatePlatform_BuildsRoutableViewBeforePublish(t *testing.T) {
 	raw := []byte(`{"type":"ss","server":"1.1.1.1","port":443}`)
 	hash := node.HashFromRawOptions(raw)
 	sub.ManagedNodes().StoreNode(hash, subscription.ManagedNode{Tags: []string{"seed"}})
-	entry := node.NewNodeEntry(hash, raw, time.Now(), 16)
+	entry := node.NewNodeEntry(hash, raw, time.Now(), 16, 100)
 	entry.AddSubscriptionID(sub.ID)
 	entry.SetEgressIP(netip.MustParseAddr("1.2.3.4"))
 	entry.LatencyTable.LoadEntry("cloudflare.com", node.DomainLatencyStats{

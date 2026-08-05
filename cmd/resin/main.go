@@ -86,6 +86,7 @@ func loadRuntimeConfig(engine *state.StateEngine) *config.RuntimeConfig {
 		return config.NewDefaultRuntimeConfig()
 	}
 	log.Printf("Loaded persisted runtime config (version %d)", ver)
+	runtimeCfg.NormalizeDestBanDefaults()
 	return runtimeCfg
 }
 
@@ -235,6 +236,16 @@ func newTopologyRuntime(
 		},
 		LatencyAuthorities: func() []string {
 			return runtimeConfigSnapshot(runtimeCfg).LatencyAuthorities
+		},
+		MaxDestBanEntries: runtimeConfigSnapshot(runtimeCfg).DestBanMaxEntries,
+		DestBanEnabled: func() bool {
+			return runtimeConfigSnapshot(runtimeCfg).DestBanEnabled
+		},
+		DestBanThreshold: func() int {
+			return runtimeConfigSnapshot(runtimeCfg).DestBanThreshold
+		},
+		DestBanTTL: func() time.Duration {
+			return time.Duration(runtimeConfigSnapshot(runtimeCfg).DestBanTTL)
 		},
 	})
 	log.Println("Topology: GlobalNodePool initialized")
@@ -711,6 +722,7 @@ func loadBootstrapNodeStatics(
 	engine *state.StateEngine,
 	pool *topology.GlobalNodePool,
 	envCfg *config.EnvConfig,
+	maxDestBanEntries int,
 ) ([]node.Hash, error) {
 	statics, err := engine.LoadAllNodesStatic()
 	if err != nil {
@@ -734,6 +746,9 @@ func loadBootstrapNodeStatics(
 		// nodes_dynamic row later overrides this state.
 		entry.CircuitOpenSince.Store(bootstrapNowNs)
 		entry.LatencyTable = node.NewLatencyTable(envCfg.MaxLatencyTableEntries)
+		if maxDestBanEntries > 0 {
+			entry.DestBanTable = node.NewDestBanTable(maxDestBanEntries)
+		}
 		pool.LoadNodeFromBootstrap(entry)
 		hashes = append(hashes, hash)
 	}
@@ -950,8 +965,9 @@ func bootstrapNodes(
 	outboundMgr *outbound.OutboundManager,
 	envCfg *config.EnvConfig,
 	latencyAuthorities []string,
+	maxDestBanEntries int,
 ) error {
-	hashes, err := loadBootstrapNodeStatics(engine, pool, envCfg)
+	hashes, err := loadBootstrapNodeStatics(engine, pool, envCfg, maxDestBanEntries)
 	if err != nil {
 		return err
 	}

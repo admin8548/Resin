@@ -59,6 +59,11 @@ var (
 		ResinError: "NO_AVAILABLE_NODES",
 		Message:    "No available nodes for routing",
 	}
+	ErrNoNodeForDest = &ProxyError{
+		HTTPCode:   http.StatusServiceUnavailable,
+		ResinError: "NO_NODE_FOR_DEST",
+		Message:    "No available nodes for target domain",
+	}
 	ErrUpstreamConnectFailed = &ProxyError{
 		HTTPCode:   http.StatusBadGateway,
 		ResinError: "UPSTREAM_CONNECT_FAILED",
@@ -137,6 +142,9 @@ func mapRouteError(err error) *ProxyError {
 	}
 	if errors.Is(err, routing.ErrNoAvailableNodes) {
 		return ErrNoAvailableNodes
+	}
+	if errors.Is(err, routing.ErrNoNodeForDest) {
+		return ErrNoNodeForDest
 	}
 	return ErrInternalError
 }

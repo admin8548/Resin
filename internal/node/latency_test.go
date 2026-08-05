@@ -169,7 +169,7 @@ func TestLatencyTable_LoadEntry(t *testing.T) {
 }
 
 func TestAverageEWMAForDomainsMs(t *testing.T) {
-	entry := NewNodeEntry(HashFromRawOptions([]byte(`{"type":"ss","server":"1.1.1.1","port":443}`)), nil, time.Now(), 16)
+	entry := NewNodeEntry(HashFromRawOptions([]byte(`{"type":"ss","server":"1.1.1.1","port":443}`)), nil, time.Now(), 16, 100)
 	entry.LatencyTable.LoadEntry("cloudflare.com", DomainLatencyStats{
 		Ewma:        40 * time.Millisecond,
 		LastUpdated: time.Now(),
@@ -193,7 +193,7 @@ func TestAverageEWMAForDomainsMs(t *testing.T) {
 }
 
 func TestAverageEWMAForDomainsMs_NoMatches(t *testing.T) {
-	entry := NewNodeEntry(HashFromRawOptions([]byte(`{"type":"ss","server":"1.1.1.1","port":443}`)), nil, time.Now(), 16)
+	entry := NewNodeEntry(HashFromRawOptions([]byte(`{"type":"ss","server":"1.1.1.1","port":443}`)), nil, time.Now(), 16, 100)
 	entry.LatencyTable.LoadEntry("cloudflare.com", DomainLatencyStats{
 		Ewma:        40 * time.Millisecond,
 		LastUpdated: time.Now(),

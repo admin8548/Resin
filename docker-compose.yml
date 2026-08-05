@@ -1,0 +1,31 @@
+# Local custom Resin instance (does NOT replace prod on :2260)
+services:
+  resin-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: resin-dev:local
+    container_name: resin-dev
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      RESIN_AUTH_VERSION: "V1"
+      RESIN_LISTEN_ADDRESS: 0.0.0.0
+      RESIN_PORT: "2261"
+      # container paths override host paths from .env
+      RESIN_STATE_DIR: /var/lib/resin
+      RESIN_CACHE_DIR: /var/cache/resin
+      RESIN_LOG_DIR: /var/log/resin
+    ports:
+      - "2261:2261"
+    volumes:
+      - ./data/cache:/var/cache/resin
+      - ./data/state:/var/lib/resin
+      - ./data/log:/var/log/resin
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:2261/healthz >/dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s

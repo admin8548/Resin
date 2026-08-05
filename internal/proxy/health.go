@@ -15,7 +15,7 @@ type HealthRecorder interface {
 }
 
 type passiveHealthRecorder interface {
-	RecordPassiveResult(platformID string, hash node.Hash, success bool)
+	RecordPassiveResult(platformID string, hash node.Hash, success bool, domain string)
 }
 
 func recordPassiveResultAsync(health HealthRecorder, route routing.RouteResult, success bool) {
@@ -23,7 +23,7 @@ func recordPassiveResultAsync(health HealthRecorder, route routing.RouteResult, 
 		return
 	}
 	if recorder, ok := health.(passiveHealthRecorder); ok {
-		go recorder.RecordPassiveResult(route.PlatformID, route.NodeHash, success)
+		go recorder.RecordPassiveResult(route.PlatformID, route.NodeHash, success, route.TargetDomain)
 		return
 	}
 	go health.RecordResult(route.NodeHash, success)

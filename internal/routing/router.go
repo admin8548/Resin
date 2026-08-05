@@ -65,8 +65,8 @@ type RouteResult struct {
 	EgressIP     netip.Addr
 	NodeTag      string // display tag: "<Subscription>/<Tag>" (DESIGN.md §601)
 	LeaseCreated bool
+	TargetDomain string // eTLD+1 (or host) for dest-ban / P2C latency
 }
-
 const livePickAttempts = 2 // first pick + one retry
 
 type leaseInvalidationReason int
@@ -95,6 +95,7 @@ func (r *Router) RouteRequest(platName, account, target string) (RouteResult, er
 		return RouteResult{}, err
 	}
 	result = withPlatformContext(plat, result)
+	result.TargetDomain = targetDomain
 	if r.nodeTagResolver != nil {
 		result.NodeTag = r.nodeTagResolver(result.NodeHash)
 	}
@@ -196,7 +197,7 @@ func (r *Router) decideStickyLease(
 	}
 
 	if loaded {
-		if newLease, hitResult, ok := r.tryLeaseHit(plat, account, current, nowNs); ok {
+		if newLease, hitResult, ok := r.tryLeaseHit(plat, account, current, targetDomain, nowNs); ok {
 			return newLease, xsync.UpdateOp, hitResult, nil
 		}
 		if newLease, rotatedResult, ok := r.tryLeaseSameIPRotation(plat, account, current, targetDomain, nowNs); ok {
@@ -252,10 +253,14 @@ func (r *Router) tryLeaseHit(
 	plat *platform.Platform,
 	account string,
 	current Lease,
+	targetDomain string,
 	nowNs int64,
 ) (Lease, RouteResult, bool) {
 	entry, ok := r.pool.GetEntry(current.NodeHash)
 	if !ok || !plat.View().Contains(current.NodeHash) || entry.GetEgressIP() != current.EgressIP {
+		return Lease{}, RouteResult{}, false
+	}
+	if entry.IsDestBanned(targetDomain) {
 		return Lease{}, RouteResult{}, false
 	}
 
@@ -426,6 +431,9 @@ func chooseSameIPRotationCandidate(
 	plat.View().Range(func(h node.Hash) bool {
 		entry, ok := pool.GetEntry(h)
 		if !ok || entry.GetEgressIP() != targetIP {
+			return true
+		}
+		if entry.IsDestBanned(targetDomain) {
 			return true
 		}
 		if fallbackHash == node.Zero {

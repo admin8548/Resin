@@ -205,8 +205,8 @@ func TestRecordPassiveResult_DisabledPlatformSkipsFailures(t *testing.T) {
 	plat.PassiveCircuitBreakerDisabled = true
 	pool.RegisterPlatform(plat)
 
-	pool.RecordPassiveResult(plat.ID, h, false)
-	pool.RecordPassiveResult(plat.ID, h, false)
+	pool.RecordPassiveResult(plat.ID, h, false, "")
+	pool.RecordPassiveResult(plat.ID, h, false, "")
 	if got := entry.FailureCount.Load(); got != 0 {
 		t.Fatalf("passive failures should be ignored, failure count=%d", got)
 	}
@@ -232,8 +232,8 @@ func TestRecordPassiveResult_EnabledPlatformCountsFailures(t *testing.T) {
 	plat.PassiveCircuitBreakerDisabled = false
 	pool.RegisterPlatform(plat)
 
-	pool.RecordPassiveResult(plat.ID, h, false)
-	pool.RecordPassiveResult(plat.ID, h, false)
+	pool.RecordPassiveResult(plat.ID, h, false, "")
+	pool.RecordPassiveResult(plat.ID, h, false, "")
 	if got := entry.FailureCount.Load(); got != 2 {
 		t.Fatalf("passive failures should be counted, failure count=%d", got)
 	}
@@ -499,5 +499,56 @@ func TestUpdateNodeEgressIP_LocStateMachine(t *testing.T) {
 	}
 	if got := entry.GetEgressIP(); got != ip2 {
 		t.Fatalf("egress IP should update on ip change: got %v, want %v", got, ip2)
+	}
+}
+
+
+func TestRecordPassiveResult_DestBanDoesNotOpenGlobalCircuit(t *testing.T) {
+	pool, subMgr := newHealthTestPool(2)
+	sub := subMgr.Lookup("s1")
+	h := addTestNode(pool, sub, `{"type":"ss","n":"destban-passive"}`)
+	entry, _ := pool.GetEntry(h)
+	pool.RecordResult(h, true)
+
+	plat := platform.NewPlatform("p1", "DestBan", nil, nil)
+	pool.RegisterPlatform(plat)
+
+	// threshold default 2
+	pool.RecordPassiveResult(plat.ID, h, false, "x.ai")
+	if entry.IsDestBanned("x.ai") {
+		t.Fatal("should not ban after 1 failure with threshold=2")
+	}
+	pool.RecordPassiveResult(plat.ID, h, false, "x.ai")
+	if !entry.IsDestBanned("x.ai") {
+		t.Fatal("should ban after 2 failures")
+	}
+	if entry.IsCircuitOpen() {
+		t.Fatal("dest ban must not open global circuit")
+	}
+	if got := entry.FailureCount.Load(); got != 0 {
+		t.Fatalf("global failure count should stay 0, got %d", got)
+	}
+
+	// success clears ban
+	pool.RecordPassiveResult(plat.ID, h, true, "x.ai")
+	if entry.IsDestBanned("x.ai") {
+		t.Fatal("success should clear dest ban")
+	}
+}
+
+func TestRecordPassiveResult_EmptyDomainFallsBackToGlobal(t *testing.T) {
+	pool, subMgr := newHealthTestPool(2)
+	sub := subMgr.Lookup("s1")
+	h := addTestNode(pool, sub, `{"type":"ss","n":"destban-empty"}`)
+	entry, _ := pool.GetEntry(h)
+	pool.RecordResult(h, true)
+
+	plat := platform.NewPlatform("p1", "Legacy", nil, nil)
+	pool.RegisterPlatform(plat)
+
+	pool.RecordPassiveResult(plat.ID, h, false, "")
+	pool.RecordPassiveResult(plat.ID, h, false, "")
+	if !entry.IsCircuitOpen() {
+		t.Fatal("empty domain passive failures should open global circuit")
 	}
 }

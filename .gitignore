@@ -9,3 +9,6 @@ start-instance.sh
 .claude/
 .omc/
 .local/
+
+# Local runtime (synced from prod, not for git)
+data/

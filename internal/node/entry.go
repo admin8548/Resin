@@ -55,7 +55,7 @@ type NodeEntry struct {
 	LastAuthorityLatencyProbeAttempt atomic.Int64
 	LastEgressUpdateAttempt          atomic.Int64
 	LatencyTable                     *LatencyTable // per-domain latency stats; nil if not initialized
-
+	DestBanTable                     *DestBanTable  // per-domain soft ban; nil if not initialized
 	// Outbound instance for this node.
 	Outbound atomic.Pointer[adapter.Outbound]
 }
@@ -63,8 +63,9 @@ type NodeEntry struct {
 // NewNodeEntry creates a NodeEntry with the given static fields.
 // maxLatencyTableEntries controls the bounded size of the regular-domain LRU
 // partition in the per-domain latency table.
-// Pass 0 to skip latency table initialization (e.g. in tests that don't need it).
-func NewNodeEntry(hash Hash, rawOptions json.RawMessage, createdAt time.Time, maxLatencyTableEntries int) *NodeEntry {
+// maxDestBanEntries controls the per-node dest-ban table size.
+// Pass 0 to skip table initialization (e.g. in tests that don't need it).
+func NewNodeEntry(hash Hash, rawOptions json.RawMessage, createdAt time.Time, maxLatencyTableEntries, maxDestBanEntries int) *NodeEntry {
 	e := &NodeEntry{
 		Hash:       hash,
 		RawOptions: rawOptions,
@@ -72,6 +73,9 @@ func NewNodeEntry(hash Hash, rawOptions json.RawMessage, createdAt time.Time, ma
 	}
 	if maxLatencyTableEntries > 0 {
 		e.LatencyTable = NewLatencyTable(maxLatencyTableEntries)
+	}
+	if maxDestBanEntries > 0 {
+		e.DestBanTable = NewDestBanTable(maxDestBanEntries)
 	}
 	return e
 }
@@ -316,4 +320,23 @@ func (e *NodeEntry) GetLastError() string {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	return e.LastError
+}
+
+// IsDestBanned reports whether the given domain is soft-banned on this node.
+// // safe for concurrent calls
+func (e *NodeEntry) IsDestBanned(domain string) bool {
+	if e == nil || e.DestBanTable == nil {
+		return false
+	}
+	return e.DestBanTable.IsBanned(domain)
+}
+
+// RecordDestResult records a passive success/failure for domain on this node.
+// threshold/ttl come from runtime config via the pool.
+// // safe for concurrent calls
+func (e *NodeEntry) RecordDestResult(domain string, success bool, threshold int, ttl time.Duration) {
+	if e == nil || e.DestBanTable == nil {
+		return
+	}
+	e.DestBanTable.Record(domain, success, threshold, ttl)
 }

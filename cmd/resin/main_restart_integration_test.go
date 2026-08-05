@@ -175,7 +175,7 @@ func TestBootstrapRestart_RecoversTopologyAndStickyLease(t *testing.T) {
 	}
 
 	outboundMgr2 := outbound.NewOutboundManager(pool2, &testutil.StubOutboundBuilder{})
-	if err := bootstrapNodes(engine2, pool2, subManager2, outboundMgr2, envCfg, runtimeCfg.LatencyAuthorities); err != nil {
+	if err := bootstrapNodes(engine2, pool2, subManager2, outboundMgr2, envCfg, runtimeCfg.LatencyAuthorities, runtimeCfg.DestBanMaxEntries); err != nil {
 		t.Fatalf("bootstrapNodes: %v", err)
 	}
 	pool2.RebuildAllPlatforms()

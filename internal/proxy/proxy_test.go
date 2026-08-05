@@ -63,6 +63,7 @@ func (m *mockHealthRecorder) RecordLatency(hash node.Hash, rawTarget string, lat
 }
 
 type mockPassiveHealthRecorder struct {
+	domain       string
 	mockHealthRecorder
 	passiveCalls atomic.Int32
 	platformID   string
@@ -71,11 +72,12 @@ type mockPassiveHealthRecorder struct {
 	done         chan struct{}
 }
 
-func (m *mockPassiveHealthRecorder) RecordPassiveResult(platformID string, hash node.Hash, success bool) {
+func (m *mockPassiveHealthRecorder) RecordPassiveResult(platformID string, hash node.Hash, success bool, domain string) {
 	m.passiveCalls.Add(1)
 	m.platformID = platformID
 	m.nodeHash = hash
 	m.success = success
+	m.domain = domain
 	if m.done != nil {
 		m.done <- struct{}{}
 	}
@@ -130,8 +132,9 @@ func TestRecordPassiveResultAsync_UsesPlatformAwareRecorder(t *testing.T) {
 	rec := &mockPassiveHealthRecorder{done: make(chan struct{}, 1)}
 
 	recordPassiveResultAsync(rec, routing.RouteResult{
-		PlatformID: "plat-1",
-		NodeHash:   h,
+		PlatformID:   "plat-1",
+		NodeHash:     h,
+		TargetDomain: "x.ai",
 	}, false)
 
 	select {
@@ -489,7 +492,7 @@ func TestForwardProxy_AuthAndSetup(t *testing.T) {
 	defer upstream.Close()
 
 	// Create a mock entry with an outbound that dials direct.
-	entry := node.NewNodeEntry(node.Hash{1}, nil, time.Now(), 0)
+	entry := node.NewNodeEntry(node.Hash{1}, nil, time.Now(), 0, 100)
 	ob := &mockOutbound{
 		dialFunc: func(ctx context.Context, network string, dest M.Socksaddr) (net.Conn, error) {
 			return net.Dial("tcp", upstream.Listener.Addr().String())

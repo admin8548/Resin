@@ -159,7 +159,7 @@ func makeHash(seed string) node.Hash {
 
 func newTestEntry(rawOpts string) *node.NodeEntry {
 	h := makeHash(rawOpts)
-	return node.NewNodeEntry(h, json.RawMessage(rawOpts), time.Now(), 0)
+	return node.NewNodeEntry(h, json.RawMessage(rawOpts), time.Now(), 0, 100)
 }
 
 // --- Tests ---
@@ -350,7 +350,7 @@ func TestWarmupAll(t *testing.T) {
 		entries[i] = node.NewNodeEntry(
 			makeHash("warmup"+string(rune('0'+i))),
 			json.RawMessage(`{}`),
-			time.Now(), 0,
+			time.Now(), 0, 100,
 		)
 		pool.addEntry(entries[i])
 	}

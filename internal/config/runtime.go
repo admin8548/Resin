@@ -30,6 +30,13 @@ type RuntimeConfig struct {
 	// Persistence
 	CacheFlushInterval       Duration `json:"cache_flush_interval"`
 	CacheFlushDirtyThreshold int      `json:"cache_flush_dirty_threshold"`
+
+	// Dest-aware soft ban (node × domain)
+	DestBanEnabled    bool     `json:"dest_ban_enabled"`
+	DestBanThreshold  int      `json:"dest_ban_threshold"`
+	DestBanTTL        Duration `json:"dest_ban_ttl"`
+	DestBanScope      string   `json:"dest_ban_scope"` // "etld1" or "host"
+	DestBanMaxEntries int      `json:"dest_ban_max_entries"`
 }
 
 // NewDefaultRuntimeConfig returns a RuntimeConfig populated with the default
@@ -56,5 +63,40 @@ func NewDefaultRuntimeConfig() *RuntimeConfig {
 
 		CacheFlushInterval:       Duration(5 * time.Minute),
 		CacheFlushDirtyThreshold: 1000,
+
+		DestBanEnabled:    true,
+		DestBanThreshold:  2,
+		DestBanTTL:        Duration(15 * time.Minute),
+		DestBanScope:      "etld1",
+		DestBanMaxEntries: 500,
+	}
+}
+
+// NormalizeDestBanDefaults fills zero-value dest-ban fields with defaults.
+// Used after loading persisted configs that predate dest-ban fields.
+func (c *RuntimeConfig) NormalizeDestBanDefaults() {
+	if c == nil {
+		return
+	}
+	// Old configs lack all dest-ban fields (zero values) → enable with defaults.
+	neverConfigured := !c.DestBanEnabled &&
+		c.DestBanThreshold == 0 &&
+		c.DestBanTTL == 0 &&
+		c.DestBanMaxEntries == 0 &&
+		c.DestBanScope == ""
+	if neverConfigured {
+		c.DestBanEnabled = true
+	}
+	if c.DestBanThreshold <= 0 {
+		c.DestBanThreshold = 2
+	}
+	if c.DestBanTTL <= 0 {
+		c.DestBanTTL = Duration(15 * time.Minute)
+	}
+	if c.DestBanMaxEntries <= 0 {
+		c.DestBanMaxEntries = 500
+	}
+	if c.DestBanScope == "" {
+		c.DestBanScope = "etld1"
 	}
 }

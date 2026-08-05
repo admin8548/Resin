@@ -914,7 +914,7 @@ func TestProbeSync_EmitsProbeEvents(t *testing.T) {
 func TestIsLatencyProbeDue_UsesAttemptTimestamps(t *testing.T) {
 	mgr := NewProbeManager(ProbeConfig{})
 	hash := node.HashFromRawOptions([]byte(`{"type":"due-check"}`))
-	entry := node.NewNodeEntry(hash, []byte(`{"type":"due-check"}`), time.Now(), 16)
+	entry := node.NewNodeEntry(hash, []byte(`{"type":"due-check"}`), time.Now(), 16, 100)
 	now := time.Now()
 
 	// Seed a very recent latency-table sample; due-check should ignore this and

@@ -249,6 +249,7 @@ func (a *resinApp) bootstrapFromPersistence(engine *state.StateEngine) error {
 		a.topoRuntime.outboundMgr,
 		a.envCfg,
 		runtimeConfigSnapshot(a.runtimeCfg).LatencyAuthorities,
+		runtimeConfigSnapshot(a.runtimeCfg).DestBanMaxEntries,
 	); err != nil {
 		return err
 	}

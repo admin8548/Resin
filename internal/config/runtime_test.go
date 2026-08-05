@@ -105,6 +105,11 @@ func TestRuntimeConfig_JSONFieldNames(t *testing.T) {
 		"latency_decay_window",
 		"cache_flush_interval",
 		"cache_flush_dirty_threshold",
+		"dest_ban_enabled",
+		"dest_ban_threshold",
+		"dest_ban_ttl",
+		"dest_ban_scope",
+		"dest_ban_max_entries",
 	}
 
 	for _, key := range expectedKeys {

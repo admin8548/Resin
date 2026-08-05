@@ -50,6 +50,12 @@ type GlobalNodePool struct {
 	maxConsecutiveFailures func() int
 	latencyDecayWindow     func() time.Duration
 	latencyAuthorities     func() []string
+
+	// Dest-aware soft ban config (hot-path getters for runtime updates).
+	maxDestBanEntries int
+	destBanEnabled    func() bool
+	destBanThreshold  func() int
+	destBanTTL        func() time.Duration
 }
 
 // PoolConfig configures the GlobalNodePool.
@@ -65,6 +71,12 @@ type PoolConfig struct {
 	MaxConsecutiveFailures func() int
 	LatencyDecayWindow     func() time.Duration
 	LatencyAuthorities     func() []string
+
+	// Dest-aware soft ban (optional; defaults applied in NewGlobalNodePool).
+	MaxDestBanEntries int
+	DestBanEnabled    func() bool
+	DestBanThreshold  func() int
+	DestBanTTL        func() time.Duration
 }
 
 var (
@@ -81,6 +93,23 @@ func NewGlobalNodePool(cfg PoolConfig) *GlobalNodePool {
 		panic("topology: NewGlobalNodePool requires non-nil MaxConsecutiveFailures")
 	}
 
+	maxDestBan := cfg.MaxDestBanEntries
+	if maxDestBan <= 0 {
+		maxDestBan = 500
+	}
+	destBanEnabled := cfg.DestBanEnabled
+	if destBanEnabled == nil {
+		destBanEnabled = func() bool { return true }
+	}
+	destBanThreshold := cfg.DestBanThreshold
+	if destBanThreshold == nil {
+		destBanThreshold = func() int { return 2 }
+	}
+	destBanTTL := cfg.DestBanTTL
+	if destBanTTL == nil {
+		destBanTTL = func() time.Duration { return 15 * time.Minute }
+	}
+
 	return &GlobalNodePool{
 		nodes:                  xsync.NewMap[node.Hash, *node.NodeEntry](),
 		subLookup:              cfg.SubLookup,
@@ -94,6 +123,10 @@ func NewGlobalNodePool(cfg PoolConfig) *GlobalNodePool {
 		maxConsecutiveFailures: maxConsecutiveFailuresFn,
 		latencyDecayWindow:     cfg.LatencyDecayWindow,
 		latencyAuthorities:     cfg.LatencyAuthorities,
+		maxDestBanEntries:      maxDestBan,
+		destBanEnabled:         destBanEnabled,
+		destBanThreshold:       destBanThreshold,
+		destBanTTL:             destBanTTL,
 		platformByID:           make(map[string]*platform.Platform),
 		platformByName:         make(map[string]*platform.Platform),
 	}
@@ -108,10 +141,13 @@ func (p *GlobalNodePool) AddNodeFromSub(hash node.Hash, rawOpts json.RawMessage,
 	p.nodes.Compute(hash, func(entry *node.NodeEntry, loaded bool) (*node.NodeEntry, xsync.ComputeOp) {
 		if !loaded {
 			createdAt := time.Now()
-			entry = node.NewNodeEntry(hash, rawOpts, createdAt, p.maxLatencyTableEntries)
+			entry = node.NewNodeEntry(hash, rawOpts, createdAt, p.maxLatencyTableEntries, p.maxDestBanEntries)
 			// New subscription nodes start as circuit-open and must be proven healthy by probes.
 			entry.CircuitOpenSince.Store(createdAt.UnixNano())
 			isNew = true
+		} else if entry.DestBanTable == nil && p.maxDestBanEntries > 0 {
+			// Heal bootstrap entries created before dest-ban support.
+			entry.DestBanTable = node.NewDestBanTable(p.maxDestBanEntries)
 		}
 		entry.AddSubscriptionID(subID)
 		return entry, xsync.UpdateOp
@@ -560,11 +596,49 @@ func (p *GlobalNodePool) RecordResult(hash node.Hash, success bool) {
 }
 
 // RecordPassiveResult records health feedback from user proxy traffic.
-// Failed passive traffic is ignored when the originating platform disables
-// passive circuit breaking; successes still count as positive health feedback.
-func (p *GlobalNodePool) RecordPassiveResult(platformID string, hash node.Hash, success bool) {
-	if success || !p.passiveCircuitBreakerDisabled(platformID) {
-		p.RecordResult(hash, success)
+// When dest-ban is enabled and domain is non-empty, passive failures only
+// update the per-(node,domain) soft ban and do not open the global circuit.
+// Successes still clear dest-ban for that domain and count as positive global health feedback.
+// When dest-ban is disabled, legacy global-circuit behavior is preserved
+// (respecting PassiveCircuitBreakerDisabled).
+func (p *GlobalNodePool) RecordPassiveResult(platformID string, hash node.Hash, success bool, domain string) {
+	domain = strings.TrimSpace(domain)
+	if domain != "" && p.destBanEnabled != nil && p.destBanEnabled() {
+		p.RecordDestResult(hash, domain, success)
+	}
+	if success {
+		p.RecordResult(hash, true)
+		return
+	}
+	// Passive failure path.
+	if p.destBanEnabled != nil && p.destBanEnabled() && domain != "" {
+		// DestBan handles isolation; do not open global circuit.
+		return
+	}
+	if !p.passiveCircuitBreakerDisabled(platformID) {
+		p.RecordResult(hash, false)
+	}
+}
+
+// RecordDestResult records a passive dest-level result for (node, domain).
+func (p *GlobalNodePool) RecordDestResult(hash node.Hash, domain string, success bool) {
+	entry, ok := p.nodes.Load(hash)
+	if !ok || entry == nil {
+		return
+	}
+	threshold := 2
+	if p.destBanThreshold != nil {
+		threshold = p.destBanThreshold()
+	}
+	ttl := 15 * time.Minute
+	if p.destBanTTL != nil {
+		ttl = p.destBanTTL()
+	}
+	wasBanned := entry.IsDestBanned(domain)
+	entry.RecordDestResult(domain, success, threshold, ttl)
+	nowBanned := entry.IsDestBanned(domain)
+	if p.onNodeDynamicChanged != nil && (wasBanned != nowBanned || !success) {
+		p.onNodeDynamicChanged(hash)
 	}
 }
 

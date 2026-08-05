@@ -21,7 +21,7 @@ func TestNodePoolStatsAdapter_HealthyNodesRequiresOutbound(t *testing.T) {
 	subMgr.Register(disabledSub)
 
 	healthyHash := node.HashFromRawOptions([]byte(`{"type":"direct","server":"1.1.1.1","port":443}`))
-	healthy := node.NewNodeEntry(healthyHash, nil, time.Now(), 0)
+	healthy := node.NewNodeEntry(healthyHash, nil, time.Now(), 0, 100)
 	healthy.AddSubscriptionID(enabledSub.ID)
 	enabledSub.ManagedNodes().StoreNode(healthyHash, subscription.ManagedNode{Tags: []string{"healthy"}})
 	healthyOb := testutil.NewNoopOutbound()
@@ -30,14 +30,14 @@ func TestNodePoolStatsAdapter_HealthyNodesRequiresOutbound(t *testing.T) {
 	pool.LoadNodeFromBootstrap(healthy)
 
 	noOutboundHash := node.HashFromRawOptions([]byte(`{"type":"direct","server":"2.2.2.2","port":443}`))
-	noOutbound := node.NewNodeEntry(noOutboundHash, nil, time.Now(), 0)
+	noOutbound := node.NewNodeEntry(noOutboundHash, nil, time.Now(), 0, 100)
 	noOutbound.AddSubscriptionID(enabledSub.ID)
 	enabledSub.ManagedNodes().StoreNode(noOutboundHash, subscription.ManagedNode{Tags: []string{"no-outbound"}})
 	noOutbound.SetEgressIP(netip.MustParseAddr("203.0.113.10"))
 	pool.LoadNodeFromBootstrap(noOutbound)
 
 	circuitOpenHash := node.HashFromRawOptions([]byte(`{"type":"direct","server":"3.3.3.3","port":443}`))
-	circuitOpen := node.NewNodeEntry(circuitOpenHash, nil, time.Now(), 0)
+	circuitOpen := node.NewNodeEntry(circuitOpenHash, nil, time.Now(), 0, 100)
 	circuitOpen.AddSubscriptionID(enabledSub.ID)
 	enabledSub.ManagedNodes().StoreNode(circuitOpenHash, subscription.ManagedNode{Tags: []string{"circuit-open"}})
 	circuitOpenOb := testutil.NewNoopOutbound()
@@ -47,7 +47,7 @@ func TestNodePoolStatsAdapter_HealthyNodesRequiresOutbound(t *testing.T) {
 	pool.LoadNodeFromBootstrap(circuitOpen)
 
 	disabledHash := node.HashFromRawOptions([]byte(`{"type":"direct","server":"4.4.4.4","port":443}`))
-	disabled := node.NewNodeEntry(disabledHash, nil, time.Now(), 0)
+	disabled := node.NewNodeEntry(disabledHash, nil, time.Now(), 0, 100)
 	disabled.AddSubscriptionID(disabledSub.ID)
 	disabledSub.ManagedNodes().StoreNode(disabledHash, subscription.ManagedNode{Tags: []string{"disabled"}})
 	disabledOb := testutil.NewNoopOutbound()
