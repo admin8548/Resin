@@ -21,8 +21,10 @@ func newNodeListTestPool(subMgr *topology.SubscriptionManager) *topology.GlobalN
 		SubLookup:              subMgr.Lookup,
 		GeoLookup:              func(netip.Addr) string { return "us" },
 		MaxLatencyTableEntries: 16,
+		MaxDestBanEntries:      16,
 		MaxConsecutiveFailures: func() int { return 3 },
 		LatencyDecayWindow:     func() time.Duration { return 10 * time.Minute },
+		DestBanTTL:             func() time.Duration { return time.Minute },
 	})
 }
 
@@ -482,6 +484,41 @@ func TestListNodes_EnabledFilter(t *testing.T) {
 	}
 	if len(nodes) != 1 || nodes[0].NodeHash != disabledHash.Hex() {
 		t.Fatalf("disabled filter result = %+v, want [%s]", nodes, disabledHash.Hex())
+	}
+}
+
+func TestListNodes_DestBanActiveFilter(t *testing.T) {
+	subMgr := topology.NewSubscriptionManager()
+	pool := newNodeListTestPool(subMgr)
+	sub := subscription.NewSubscription("sub-db", "sub-db", "https://example.com/db", true, false)
+	subMgr.Register(sub)
+
+	banned := addRoutableNodeForSubscription(t, pool, sub, []byte(`{"type":"ss","server":"1.1.1.1","port":443}`), "203.0.113.70")
+	clean := addRoutableNodeForSubscription(t, pool, sub, []byte(`{"type":"ss","server":"1.1.1.2","port":443}`), "203.0.113.71")
+	if !pool.SetDestBan(banned, "grok.com", time.Minute) {
+		t.Fatal("SetDestBan failed")
+	}
+
+	cp := &ControlPlaneService{Pool: pool, SubMgr: subMgr}
+	active := true
+	nodes, err := cp.ListNodes(NodeFilters{DestBanActive: &active})
+	if err != nil {
+		t.Fatalf("ListNodes dest_ban_active=true: %v", err)
+	}
+	if len(nodes) != 1 || nodes[0].NodeHash != banned.Hex() {
+		t.Fatalf("dest_ban_active=true: got %+v, want only %s", nodes, banned.Hex())
+	}
+	if nodes[0].DestBanCount != 1 {
+		t.Fatalf("DestBanCount=%d want 1", nodes[0].DestBanCount)
+	}
+
+	inactive := false
+	nodes, err = cp.ListNodes(NodeFilters{DestBanActive: &inactive})
+	if err != nil {
+		t.Fatalf("ListNodes dest_ban_active=false: %v", err)
+	}
+	if len(nodes) != 1 || nodes[0].NodeHash != clean.Hex() {
+		t.Fatalf("dest_ban_active=false: got %+v, want only %s", nodes, clean.Hex())
 	}
 }
 

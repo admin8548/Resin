@@ -131,6 +131,12 @@ func HandleListNodes(cp *service.ControlPlaneService) http.HandlerFunc {
 		}
 		filters.HasOutbound = hasOutbound
 
+		destBanActive, ok := parseBoolQueryOrWriteInvalid(w, r, "dest_ban_active")
+		if !ok {
+			return
+		}
+		filters.DestBanActive = destBanActive
+
 		enabled, ok := parseBoolQueryOrWriteInvalid(w, r, "enabled")
 		if !ok {
 			return

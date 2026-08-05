@@ -60,6 +60,7 @@ export type NodeListFilters = {
   enabled?: boolean;
   circuit_open?: boolean;
   has_outbound?: boolean;
+  dest_ban_active?: boolean;
 };
 
 export type NodeListQuery = NodeListFilters & {

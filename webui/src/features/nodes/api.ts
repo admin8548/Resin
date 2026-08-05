@@ -83,6 +83,9 @@ export async function listNodes(filters: NodeListQuery): Promise<PageResponse<No
   if (filters.has_outbound !== undefined) {
     query.set("has_outbound", String(filters.has_outbound));
   }
+  if (filters.dest_ban_active !== undefined) {
+    query.set("dest_ban_active", String(filters.dest_ban_active));
+  }
   if (filters.enabled !== undefined) {
     query.set("enabled", String(filters.enabled));
   }

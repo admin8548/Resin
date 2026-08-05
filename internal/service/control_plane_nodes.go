@@ -22,6 +22,7 @@ type NodeFilters struct {
 	Region         *string
 	CircuitOpen    *bool
 	HasOutbound    *bool
+	DestBanActive  *bool // true: at least one active dest ban; false: none
 	EgressIP       *string
 	ProbedSince    *time.Time
 	TagKeyword     *string
@@ -186,6 +187,13 @@ func (s *ControlPlaneService) nodeEntryMatchesFilters(
 	// Has outbound filter.
 	if filters.HasOutbound != nil {
 		if entry.HasOutbound() != *filters.HasOutbound {
+			return false
+		}
+	}
+	// Dest-ban active filter.
+	if filters.DestBanActive != nil {
+		hasActive := entry.ActiveDestBanCount() > 0
+		if hasActive != *filters.DestBanActive {
 			return false
 		}
 	}

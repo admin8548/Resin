@@ -31,7 +31,7 @@ import type { NodeSummary } from "./types";
 import { getAllRegions, getRegionName } from "./regions";
 import type { NodeListFilters, NodeSortBy, SortOrder } from "./types";
 
-type NodeStatusFilter = "all" | "healthy" | "circuit_open" | "error" | "disabled";
+type NodeStatusFilter = "all" | "healthy" | "circuit_open" | "dest_ban" | "error" | "disabled";
 type NodeDisplayStatus = "healthy" | "circuit_open" | "pending_test" | "error" | "disabled";
 type ProbeAction = "egress" | "latency";
 
@@ -92,7 +92,14 @@ function parseStatusParam(value: string | null): NodeStatusFilter | undefined {
   }
 
   const normalized = value.trim().toLowerCase();
-  if (normalized === "all" || normalized === "healthy" || normalized === "circuit_open" || normalized === "error" || normalized === "disabled") {
+  if (
+    normalized === "all" ||
+    normalized === "healthy" ||
+    normalized === "circuit_open" ||
+    normalized === "dest_ban" ||
+    normalized === "error" ||
+    normalized === "disabled"
+  ) {
     return normalized;
   }
 
@@ -103,6 +110,11 @@ function statusFromQuery(params: URLSearchParams): NodeStatusFilter {
   const explicitStatus = parseStatusParam(params.get("status"));
   if (explicitStatus) {
     return explicitStatus;
+  }
+
+  const destBanActive = parseBoolParam(params.get("dest_ban_active"));
+  if (destBanActive === true) {
+    return "dest_ban";
   }
 
   const hasOutbound = parseBoolParam(params.get("has_outbound"));
@@ -150,6 +162,7 @@ function draftToActiveFilters(draft: NodeFilterDraft): NodeListFilters {
   let circuit_open: boolean | undefined = undefined;
   let has_outbound: boolean | undefined = undefined;
   let enabled: boolean | undefined = undefined;
+  let dest_ban_active: boolean | undefined = undefined;
 
   switch (draft.status) {
     case "healthy":
@@ -161,6 +174,10 @@ function draftToActiveFilters(draft: NodeFilterDraft): NodeListFilters {
       enabled = true;
       has_outbound = true;
       circuit_open = true;
+      break;
+    case "dest_ban":
+      // Any node with at least one active (node × domain) soft-ban.
+      dest_ban_active = true;
       break;
     case "error":
       enabled = true;
@@ -183,6 +200,7 @@ function draftToActiveFilters(draft: NodeFilterDraft): NodeListFilters {
     enabled,
     circuit_open,
     has_outbound,
+    dest_ban_active,
   };
 }
 
@@ -651,11 +669,29 @@ export function NodesPage() {
       cell: (info) => {
         const node = info.row.original;
         const status = getNodeDisplayStatus(node);
-        if (status === "disabled") return <Badge variant="neutral">{t("禁用")}</Badge>;
-        if (status === "error") return <Badge variant="danger">{t("错误")}</Badge>;
-        if (status === "pending_test") return <Badge variant="muted">{t("待测")}</Badge>;
-        if (status === "circuit_open") return <Badge variant="warning">{t("熔断")}</Badge>;
-        return <Badge variant="success">{t("健康")}</Badge>;
+        const destBanCount = node.dest_ban_count ?? 0;
+        const statusBadge =
+          status === "disabled" ? (
+            <Badge variant="neutral">{t("禁用")}</Badge>
+          ) : status === "error" ? (
+            <Badge variant="danger">{t("错误")}</Badge>
+          ) : status === "pending_test" ? (
+            <Badge variant="muted">{t("待测")}</Badge>
+          ) : status === "circuit_open" ? (
+            <Badge variant="warning">{t("熔断")}</Badge>
+          ) : (
+            <Badge variant="success">{t("健康")}</Badge>
+          );
+        return (
+          <div style={{ display: "flex", gap: "4px", flexWrap: "wrap", alignItems: "center" }}>
+            {statusBadge}
+            {destBanCount > 0 ? (
+              <Badge variant="warning" title={t("存在 {{count}} 个域名屏蔽", { count: destBanCount })}>
+                {t("域屏蔽")}{destBanCount > 1 ? `×${destBanCount}` : ""}
+              </Badge>
+            ) : null}
+          </div>
+        );
       },
     }),
     col.accessor("created_at", {
@@ -834,6 +870,7 @@ export function NodesPage() {
                 <option value="all">{t("全部")}</option>
                 <option value="healthy">{t("健康")}</option>
                 <option value="circuit_open">{t("熔断 / 待测")}</option>
+                <option value="dest_ban">{t("域名屏蔽中")}</option>
                 <option value="error">{t("错误")}</option>
                 <option value="disabled">{t("禁用")}</option>
               </Select>
