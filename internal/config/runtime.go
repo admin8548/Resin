@@ -64,9 +64,10 @@ func NewDefaultRuntimeConfig() *RuntimeConfig {
 		CacheFlushInterval:       Duration(5 * time.Minute),
 		CacheFlushDirtyThreshold: 1000,
 
-		DestBanEnabled:    true,
-		DestBanThreshold:  2,
-		DestBanTTL:        Duration(15 * time.Minute),
+		DestBanEnabled:   true,
+		DestBanThreshold: 2,
+		// 7d: (node × dest) can stay broken for days; short TTLs thrash routing on permanent fails.
+		DestBanTTL:        Duration(7 * 24 * time.Hour),
 		DestBanScope:      "etld1",
 		DestBanMaxEntries: 500,
 	}
@@ -91,7 +92,7 @@ func (c *RuntimeConfig) NormalizeDestBanDefaults() {
 		c.DestBanThreshold = 2
 	}
 	if c.DestBanTTL <= 0 {
-		c.DestBanTTL = Duration(15 * time.Minute)
+		c.DestBanTTL = Duration(7 * 24 * time.Hour)
 	}
 	if c.DestBanMaxEntries <= 0 {
 		c.DestBanMaxEntries = 500

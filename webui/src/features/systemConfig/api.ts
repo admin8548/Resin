@@ -22,7 +22,7 @@ const DEFAULT_CONFIG: RuntimeConfig = {
   cache_flush_dirty_threshold: 0,
   dest_ban_enabled: true,
   dest_ban_threshold: 2,
-  dest_ban_ttl: "15m0s",
+  dest_ban_ttl: "168h0m0s",
   dest_ban_scope: "etld1",
   dest_ban_max_entries: 500,
 };

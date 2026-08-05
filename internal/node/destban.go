@@ -54,7 +54,7 @@ func (t *DestBanTable) Record(domain string, success bool, threshold int, ttl ti
 		threshold = 1
 	}
 	if ttl <= 0 {
-		ttl = 15 * time.Minute
+		ttl = 7 * 24 * time.Hour
 	}
 
 	key := domainKey(domain)
@@ -204,7 +204,7 @@ func (t *DestBanTable) SetBan(domain string, ttl time.Duration) {
 		return
 	}
 	if ttl <= 0 {
-		ttl = 15 * time.Minute
+		ttl = 7 * 24 * time.Hour
 	}
 	key := domainKey(domain)
 	nowNs := time.Now().UnixNano()

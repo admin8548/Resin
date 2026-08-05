@@ -49,7 +49,7 @@ type DestBanEntry struct {
 ```yaml
 dest_ban_enabled: true
 dest_ban_threshold: 2
-dest_ban_ttl: 15m
+dest_ban_ttl: 168h  # 7 days
 dest_ban_scope: etld1          # 或 host
 dest_ban_max_entries: 500      # per node
 dest_ban_error_stages: ["connect_dial", "timeout", "network_error"]

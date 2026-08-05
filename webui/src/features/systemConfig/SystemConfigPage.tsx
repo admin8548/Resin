@@ -569,7 +569,7 @@ export function SystemConfigPage() {
                       id="sys-dest-ban-ttl"
                       value={form.dest_ban_ttl}
                       onChange={(event) => setFormField("dest_ban_ttl", event.target.value)}
-                      placeholder="15m"
+                      placeholder="168h (7d)"
                     />
                   </div>
                   <div className="field-group">

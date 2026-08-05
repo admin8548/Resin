@@ -1067,7 +1067,7 @@ export function NodesPage() {
                     style={{ flex: "1 1 160px", minWidth: "140px" }}
                   />
                   <Input
-                    placeholder={t("TTL 可选，如 15m")}
+                    placeholder={t("TTL 可选，如 168h")}
                     value={destBanTTL}
                     onChange={(event) => setDestBanTTL(event.target.value)}
                     style={{ flex: "0 1 120px", minWidth: "100px" }}

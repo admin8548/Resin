@@ -107,7 +107,7 @@ func NewGlobalNodePool(cfg PoolConfig) *GlobalNodePool {
 	}
 	destBanTTL := cfg.DestBanTTL
 	if destBanTTL == nil {
-		destBanTTL = func() time.Duration { return 15 * time.Minute }
+		destBanTTL = func() time.Duration { return 7 * 24 * time.Hour }
 	}
 
 	return &GlobalNodePool{
@@ -630,7 +630,7 @@ func (p *GlobalNodePool) RecordDestResult(hash node.Hash, domain string, success
 	if p.destBanThreshold != nil {
 		threshold = p.destBanThreshold()
 	}
-	ttl := 15 * time.Minute
+	ttl := 7 * 24 * time.Hour
 	if p.destBanTTL != nil {
 		ttl = p.destBanTTL()
 	}
@@ -658,7 +658,7 @@ func (p *GlobalNodePool) SetDestBan(hash node.Hash, domain string, ttl time.Dura
 		return false
 	}
 	if ttl <= 0 {
-		ttl = 15 * time.Minute
+		ttl = 7 * 24 * time.Hour
 		if p.destBanTTL != nil {
 			ttl = p.destBanTTL()
 		}
