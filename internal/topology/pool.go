@@ -42,8 +42,9 @@ type GlobalNodePool struct {
 	onSubNodeChanged func(subID string, hash node.Hash, added bool)
 
 	// Health callbacks (optional).
-	onNodeDynamicChanged func(hash node.Hash)                // fired on circuit/failure/egress changes
-	onNodeLatencyChanged func(hash node.Hash, domain string) // fired on latency upserts and evictions
+	onNodeDynamicChanged func(hash node.Hash)                              // fired on circuit/failure/egress changes
+	onNodeLatencyChanged func(hash node.Hash, domain string)               // fired on latency upserts and evictions
+	onNodeDestBanChanged func(hash node.Hash, domain string, deleted bool) // fired on dest-ban upsert/delete
 
 	// Health config
 	maxLatencyTableEntries int
@@ -67,6 +68,7 @@ type PoolConfig struct {
 	OnSubNodeChanged       func(subID string, hash node.Hash, added bool)
 	OnNodeDynamicChanged   func(hash node.Hash)
 	OnNodeLatencyChanged   func(hash node.Hash, domain string)
+	OnNodeDestBanChanged   func(hash node.Hash, domain string, deleted bool)
 	MaxLatencyTableEntries int
 	MaxConsecutiveFailures func() int
 	LatencyDecayWindow     func() time.Duration
@@ -119,6 +121,7 @@ func NewGlobalNodePool(cfg PoolConfig) *GlobalNodePool {
 		onSubNodeChanged:       cfg.OnSubNodeChanged,
 		onNodeDynamicChanged:   cfg.OnNodeDynamicChanged,
 		onNodeLatencyChanged:   cfg.OnNodeLatencyChanged,
+		onNodeDestBanChanged:   cfg.OnNodeDestBanChanged,
 		maxLatencyTableEntries: cfg.MaxLatencyTableEntries,
 		maxConsecutiveFailures: maxConsecutiveFailuresFn,
 		latencyDecayWindow:     cfg.LatencyDecayWindow,
@@ -635,10 +638,18 @@ func (p *GlobalNodePool) RecordDestResult(hash node.Hash, domain string, success
 		ttl = p.destBanTTL()
 	}
 	wasBanned := entry.IsDestBanned(domain)
-	entry.RecordDestResult(domain, success, threshold, ttl)
+	evicted := entry.RecordDestResult(domain, success, threshold, ttl)
 	nowBanned := entry.IsDestBanned(domain)
 	if p.onNodeDynamicChanged != nil && (wasBanned != nowBanned || !success) {
 		p.onNodeDynamicChanged(hash)
+	}
+	if success {
+		p.notifyDestBan(hash, domain, true)
+	} else {
+		p.notifyDestBan(hash, domain, false)
+	}
+	if evicted != "" && evicted != domain {
+		p.notifyDestBan(hash, evicted, true)
 	}
 }
 
@@ -664,9 +675,13 @@ func (p *GlobalNodePool) SetDestBan(hash node.Hash, domain string, ttl time.Dura
 		}
 	}
 	wasBanned := entry.IsDestBanned(domain)
-	entry.SetDestBan(domain, ttl)
+	evicted := entry.SetDestBan(domain, ttl)
 	if p.onNodeDynamicChanged != nil && !wasBanned {
 		p.onNodeDynamicChanged(hash)
+	}
+	p.notifyDestBan(hash, domain, false)
+	if evicted != "" && evicted != domain {
+		p.notifyDestBan(hash, evicted, true)
 	}
 	return true
 }
@@ -682,7 +697,17 @@ func (p *GlobalNodePool) ClearDestBan(hash node.Hash, domain string) (cleared bo
 	if p.onNodeDynamicChanged != nil && (wasBanned || cleared) {
 		p.onNodeDynamicChanged(hash)
 	}
+	if cleared {
+		p.notifyDestBan(hash, domain, true)
+	}
 	return cleared, true
+}
+
+func (p *GlobalNodePool) notifyDestBan(hash node.Hash, domain string, deleted bool) {
+	if p == nil || p.onNodeDestBanChanged == nil || domain == "" {
+		return
+	}
+	p.onNodeDestBanChanged(hash, domain, deleted)
 }
 
 func (p *GlobalNodePool) passiveCircuitBreakerDisabled(platformID string) bool {

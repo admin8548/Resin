@@ -17,6 +17,8 @@ import { getCurrentLocale, isEnglishLocale } from "../../i18n/locale";
 import { formatBytes } from "../../lib/bytes";
 import { formatApiErrorMessage } from "../../lib/error-message";
 import { formatDateTime } from "../../lib/time";
+import { listNodeDestBans } from "../nodes/api";
+import type { DestBanItem } from "../nodes/types";
 import { getSystemConfig } from "../systemConfig/api";
 import { getRequestLog, getRequestLogPayloads, listRequestLogs } from "./api";
 import type { RequestLogItem, RequestLogListFilters } from "./types";
@@ -358,6 +360,54 @@ function splitDateTime(input: string): { date: string; time: string } {
   return { date, time };
 }
 
+
+function targetHostName(targetHost: string): string {
+  const raw = (targetHost || "").trim().toLowerCase();
+  if (!raw) return "";
+  // strip port; keep bracketed IPv6 host as-is without port
+  if (raw.startsWith("[")) {
+    const end = raw.indexOf("]");
+    return end > 0 ? raw.slice(1, end) : raw;
+  }
+  const idx = raw.lastIndexOf(":");
+  if (idx > 0 && raw.indexOf(":") === idx) {
+    return raw.slice(0, idx);
+  }
+  return raw;
+}
+
+function destBanMatchesHost(domain: string, targetHost: string): boolean {
+  const host = targetHostName(targetHost);
+  const d = (domain || "").trim().toLowerCase();
+  if (!host || !d) return false;
+  return host === d || host.endsWith("." + d);
+}
+
+function formatDestBanStatus(items: DestBanItem[] | undefined, targetHost: string, t: (s: string) => string): {
+  forTarget: string;
+  summary: string;
+  activeItems: DestBanItem[];
+} {
+  const list = items ?? [];
+  const active = list.filter((i) => i.active);
+  const hit = active.find((i) => destBanMatchesHost(i.domain, targetHost));
+  if (!active.length) {
+    return { forTarget: t("未屏蔽"), summary: t("无活跃目的地屏蔽"), activeItems: [] };
+  }
+  if (hit) {
+    return {
+      forTarget: t("已屏蔽") + ` (${hit.domain})`,
+      summary: t("该目标域名当前被 DestBan 屏蔽"),
+      activeItems: active,
+    };
+  }
+  return {
+    forTarget: t("未屏蔽该目标") + ` / ${t("节点另有")} ${active.length} ${t("个域名屏蔽")}`,
+    summary: t("节点存在其它域名的 DestBan，但不覆盖本请求目标"),
+    activeItems: active,
+  };
+}
+
 export function RequestLogsPage() {
   const { t } = useI18n();
   const [filters, setFilters] = useState<FilterDraft>(defaultFilters);
@@ -467,6 +517,18 @@ export function RequestLogsPage() {
     enabled: drawerVisible && Boolean(detailLog?.payload_present),
     staleTime: 30_000,
   });
+
+  const detailNodeHash = detailLog?.node_hash?.trim() || "";
+  const destBanQuery = useQuery({
+    queryKey: ["request-log-node-dest-bans", detailNodeHash],
+    queryFn: () => listNodeDestBans(detailNodeHash),
+    enabled: drawerVisible && Boolean(detailNodeHash),
+    staleTime: 5_000,
+  });
+  const destBanStatus = useMemo(
+    () => formatDestBanStatus(destBanQuery.data?.items, detailLog?.target_host || "", t),
+    [destBanQuery.data?.items, detailLog?.target_host, t],
+  );
 
   useEffect(() => {
     if (!drawerVisible) {
@@ -1015,6 +1077,16 @@ export function RequestLogsPage() {
                     <p>{detailLog.egress_ip || "-"}</p>
                   </div>
                   <div>
+                    <span>{t("DestBan 状态")}</span>
+                    <p>
+                      {detailNodeHash ? (
+                        destBanQuery.isLoading ? t("加载中…") : destBanStatus.forTarget
+                      ) : (
+                        "-"
+                      )}
+                    </p>
+                  </div>
+                  <div>
                     <span>{t("客户端 IP")}</span>
                     <p>{detailLog.client_ip || "-"}</p>
                   </div>
@@ -1078,6 +1150,40 @@ export function RequestLogsPage() {
                       {t("当前请求未产生异常诊断信息")}
                     </div>
                   ) : null}
+
+                  {/* live dest-ban diagnosis for the routed node */}
+                  <div style={{ marginTop: (detailLog.resin_error || detailLog.upstream_stage || detailLog.upstream_err_kind || detailLog.upstream_err_msg) ? 12 : 0 }}>
+                    <table style={{ borderCollapse: "collapse", width: "100%" }}>
+                      <tbody>
+                        <tr>
+                          <td style={{ color: "var(--accent)", fontWeight: 600, paddingBottom: "8px", paddingRight: "16px", whiteSpace: "nowrap", verticalAlign: "top", width: "1%" }}>{t("节点屏蔽:")}</td>
+                          <td style={{ color: "var(--text)", paddingBottom: "8px", wordBreak: "break-all", verticalAlign: "top" }}>
+                            {!detailNodeHash
+                              ? t("无节点")
+                              : destBanQuery.isLoading
+                                ? t("加载中…")
+                                : destBanQuery.isError
+                                  ? formatApiErrorMessage(destBanQuery.error, t)
+                                  : destBanStatus.summary}
+                          </td>
+                        </tr>
+                        {destBanStatus.activeItems.length > 0 ? (
+                          <tr>
+                            <td style={{ fontWeight: 600, paddingBottom: "8px", paddingRight: "16px", whiteSpace: "nowrap", verticalAlign: "top", width: "1%" }}>{t("屏蔽域名:")}</td>
+                            <td style={{ color: "var(--text)", paddingBottom: "8px", wordBreak: "break-all", verticalAlign: "top" }}>
+                              {destBanStatus.activeItems
+                                .map((item) => {
+                                  const mark = destBanMatchesHost(item.domain, detailLog.target_host || "") ? "★ " : "";
+                                  const until = item.banned_until ? ` → ${item.banned_until}` : "";
+                                  return `${mark}${item.domain}${until}`;
+                                })
+                                .join("；")}
+                            </td>
+                          </tr>
+                        ) : null}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               </section>
 

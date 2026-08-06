@@ -227,6 +227,13 @@ func newTopologyRuntime(
 		OnNodeLatencyChanged: func(hash node.Hash, domain string) {
 			engine.MarkNodeLatency(hash.Hex(), domain)
 		},
+		OnNodeDestBanChanged: func(hash node.Hash, domain string, deleted bool) {
+			if deleted {
+				engine.MarkNodeDestBanDelete(hash.Hex(), domain)
+				return
+			}
+			engine.MarkNodeDestBan(hash.Hex(), domain)
+		},
 		MaxLatencyTableEntries: envCfg.MaxLatencyTableEntries,
 		MaxConsecutiveFailures: func() int {
 			return runtimeConfigSnapshot(runtimeCfg).MaxConsecutiveFailures
@@ -350,13 +357,21 @@ func markNodeRemovedDirty(engine *state.StateEngine, hash node.Hash, entry *node
 	engine.MarkNodeStaticDelete(hashHex)
 	engine.MarkNodeDynamicDelete(hashHex)
 
-	if entry == nil || entry.LatencyTable == nil {
+	if entry == nil {
 		return
 	}
-	entry.LatencyTable.Range(func(domain string, _ node.DomainLatencyStats) bool {
-		engine.MarkNodeLatencyDelete(hashHex, domain)
-		return true
-	})
+	if entry.LatencyTable != nil {
+		entry.LatencyTable.Range(func(domain string, _ node.DomainLatencyStats) bool {
+			engine.MarkNodeLatencyDelete(hashHex, domain)
+			return true
+		})
+	}
+	if entry.DestBanTable != nil {
+		entry.DestBanTable.Range(func(domain string, _ node.DestBanEntry) bool {
+			engine.MarkNodeDestBanDelete(hashHex, domain)
+			return true
+		})
+	}
 }
 
 func bootstrapTopology(
@@ -541,6 +556,29 @@ func newFlushReaders(
 				Domain:        key.Domain,
 				EwmaNs:        int64(stats.Ewma),
 				LastUpdatedNs: stats.LastUpdated.UnixNano(),
+			}
+		},
+		ReadNodeDestBan: func(key model.NodeDestBanKey) *model.NodeDestBan {
+			h, err := node.ParseHex(key.NodeHash)
+			if err != nil {
+				return nil
+			}
+			entry, ok := pool.GetEntry(h)
+			if !ok || entry == nil || entry.DestBanTable == nil {
+				return nil
+			}
+			snap, ok := entry.LookupDestBan(key.Domain)
+			if !ok {
+				return nil
+			}
+			return &model.NodeDestBan{
+				NodeHash:      key.NodeHash,
+				Domain:        snap.Domain,
+				FailCount:     int(snap.Entry.FailCount),
+				BannedUntilNs: snap.Entry.BannedUntil,
+				LastError:     snap.Entry.LastError,
+				LastFailAtNs:  snap.Entry.LastFailAt,
+				LastAccessNs:  snap.LastAccessNs,
 			}
 		},
 		ReadLease: func(key model.LeaseKey) *model.Lease {
@@ -956,6 +994,43 @@ func restoreBootstrapNodeLatencies(
 	return nil
 }
 
+func restoreBootstrapNodeDestBans(
+	engine *state.StateEngine,
+	pool *topology.GlobalNodePool,
+) error {
+	rows, err := engine.LoadAllNodeDestBan()
+	if err != nil {
+		return fmt.Errorf("load node_dest_ban: %w", err)
+	}
+	nowNs := time.Now().UnixNano()
+	loaded := 0
+	expired := 0
+	for _, row := range rows {
+		if row.BannedUntilNs > 0 && row.BannedUntilNs <= nowNs {
+			engine.MarkNodeDestBanDelete(row.NodeHash, row.Domain)
+			expired++
+			continue
+		}
+		hash, err := node.ParseHex(row.NodeHash)
+		if err != nil {
+			continue
+		}
+		entry, ok := pool.GetEntry(hash)
+		if !ok || entry == nil {
+			continue
+		}
+		entry.LoadDestBan(row.Domain, node.DestBanEntry{
+			FailCount:   uint32(row.FailCount),
+			BannedUntil: row.BannedUntilNs,
+			LastError:   row.LastError,
+			LastFailAt:  row.LastFailAtNs,
+		}, row.LastAccessNs)
+		loaded++
+	}
+	log.Printf("Loaded %d dest-ban entries from cache.db (expired=%d)", loaded, expired)
+	return nil
+}
+
 // bootstrapNodes loads cached node data from persistence for bootstrap recovery.
 // Steps: static nodes → subscription bindings → dynamic state → latency tables.
 func bootstrapNodes(
@@ -986,6 +1061,9 @@ func bootstrapNodes(
 		envCfg.MaxLatencyTableEntries,
 		latencyAuthorities,
 	); err != nil {
+		return err
+	}
+	if err := restoreBootstrapNodeDestBans(engine, pool); err != nil {
 		return err
 	}
 	return nil

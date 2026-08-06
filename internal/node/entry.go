@@ -333,12 +333,13 @@ func (e *NodeEntry) IsDestBanned(domain string) bool {
 
 // RecordDestResult records a passive success/failure for domain on this node.
 // threshold/ttl come from runtime config via the pool.
+// Returns LRU-evicted domain when the table drops another entry.
 // // safe for concurrent calls
-func (e *NodeEntry) RecordDestResult(domain string, success bool, threshold int, ttl time.Duration) {
+func (e *NodeEntry) RecordDestResult(domain string, success bool, threshold int, ttl time.Duration) (evictedDomain string) {
 	if e == nil || e.DestBanTable == nil {
-		return
+		return ""
 	}
-	e.DestBanTable.Record(domain, success, threshold, ttl)
+	return e.DestBanTable.Record(domain, success, threshold, ttl)
 }
 
 // ListDestBans returns a snapshot of dest-ban entries on this node.
@@ -360,12 +361,31 @@ func (e *NodeEntry) ActiveDestBanCount() int {
 }
 
 // SetDestBan forces a soft-ban for domain until now+ttl.
+// Returns LRU-evicted domain when the table drops another entry.
 // // safe for concurrent calls
-func (e *NodeEntry) SetDestBan(domain string, ttl time.Duration) {
+func (e *NodeEntry) SetDestBan(domain string, ttl time.Duration) (evictedDomain string) {
+	if e == nil || e.DestBanTable == nil {
+		return ""
+	}
+	return e.DestBanTable.SetBan(domain, ttl)
+}
+
+// LoadDestBan restores one dest-ban entry from persistence.
+// // safe for concurrent calls
+func (e *NodeEntry) LoadDestBan(domain string, entry DestBanEntry, lastAccessNs int64) {
 	if e == nil || e.DestBanTable == nil {
 		return
 	}
-	e.DestBanTable.SetBan(domain, ttl)
+	e.DestBanTable.LoadEntry(domain, entry, lastAccessNs)
+}
+
+// LookupDestBan returns a snapshot for domain when present.
+// // safe for concurrent calls
+func (e *NodeEntry) LookupDestBan(domain string) (DestBanSnapshot, bool) {
+	if e == nil || e.DestBanTable == nil {
+		return DestBanSnapshot{}, false
+	}
+	return e.DestBanTable.Lookup(domain)
 }
 
 // ClearDestBan removes dest-ban state for domain. Returns whether an entry existed.

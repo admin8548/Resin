@@ -91,6 +91,23 @@ type NodeLatencyKey struct {
 	Domain   string
 }
 
+// NodeDestBan holds per-domain dest soft-ban state for a node (cache.db).
+type NodeDestBan struct {
+	NodeHash      string `json:"node_hash"`
+	Domain        string `json:"domain"`
+	FailCount     int    `json:"fail_count"`
+	BannedUntilNs int64  `json:"banned_until_ns"`
+	LastError     string `json:"last_error"`
+	LastFailAtNs  int64  `json:"last_fail_at_ns"`
+	LastAccessNs  int64  `json:"last_access_ns"`
+}
+
+// NodeDestBanKey is the composite primary key for node_dest_ban.
+type NodeDestBanKey struct {
+	NodeHash string
+	Domain   string
+}
+
 // Lease represents a sticky routing lease.
 type Lease struct {
 	PlatformID     string `json:"platform_id"`

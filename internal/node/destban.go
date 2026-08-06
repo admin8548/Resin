@@ -45,10 +45,11 @@ func NewDestBanTable(maxEntries int) *DestBanTable {
 // On success: clears the entry.
 // On failure: increments FailCount; when FailCount >= threshold, sets BannedUntil = now+ttl.
 // When full, least-recently-accessed entry is evicted.
+// Returns the domain evicted by LRU (empty when none).
 // // safe for concurrent calls
-func (t *DestBanTable) Record(domain string, success bool, threshold int, ttl time.Duration) {
+func (t *DestBanTable) Record(domain string, success bool, threshold int, ttl time.Duration) (evictedDomain string) {
 	if t == nil || domain == "" {
-		return
+		return ""
 	}
 	if threshold <= 0 {
 		threshold = 1
@@ -66,18 +67,21 @@ func (t *DestBanTable) Record(domain string, success bool, threshold int, ttl ti
 	if idx, found := t.findLocked(key); found {
 		if success {
 			t.slots[idx].occupied = false
-			return
+			return ""
 		}
 		t.applyFailureLocked(idx, domain, nowNs, threshold, ttl)
-		return
+		return ""
 	}
 
 	if success {
-		return // nothing to clear
+		return "" // nothing to clear
 	}
 
 	// Insert or evict.
 	idx := t.pickSlotLocked()
+	if t.slots[idx].occupied {
+		evictedDomain = t.slots[idx].domain
+	}
 	t.slots[idx] = destBanSlot{
 		key:          key,
 		domain:       domain,
@@ -85,6 +89,7 @@ func (t *DestBanTable) Record(domain string, success bool, threshold int, ttl ti
 		lastAccessNs: nowNs,
 	}
 	t.applyFailureLocked(idx, domain, nowNs, threshold, ttl)
+	return evictedDomain
 }
 
 // IsBanned reports whether domain is currently soft-banned.
@@ -198,10 +203,11 @@ type DestBanSnapshot struct {
 }
 
 // SetBan forces a soft-ban for domain until now+ttl.
+// Returns the domain evicted by LRU (empty when none).
 // // safe for concurrent calls
-func (t *DestBanTable) SetBan(domain string, ttl time.Duration) {
+func (t *DestBanTable) SetBan(domain string, ttl time.Duration) (evictedDomain string) {
 	if t == nil || domain == "" {
-		return
+		return ""
 	}
 	if ttl <= 0 {
 		ttl = 7 * 24 * time.Hour
@@ -213,6 +219,9 @@ func (t *DestBanTable) SetBan(domain string, ttl time.Duration) {
 	idx, found := t.findLocked(key)
 	if !found {
 		idx = t.pickSlotLocked()
+		if t.slots[idx].occupied {
+			evictedDomain = t.slots[idx].domain
+		}
 		t.slots[idx] = destBanSlot{
 			key:          key,
 			domain:       domain,
@@ -232,6 +241,64 @@ func (t *DestBanTable) SetBan(domain string, ttl time.Duration) {
 	t.slots[idx].domain = domain
 	t.slots[idx].lastAccessNs = nowNs
 	t.slots[idx].occupied = true
+	return evictedDomain
+}
+
+// LoadEntry restores a dest-ban slot from persistence (no threshold logic).
+// Expired bans (BannedUntil > 0 && <= now) are ignored.
+// // safe for concurrent calls
+func (t *DestBanTable) LoadEntry(domain string, entry DestBanEntry, lastAccessNs int64) {
+	if t == nil || domain == "" {
+		return
+	}
+	nowNs := time.Now().UnixNano()
+	if entry.BannedUntil > 0 && entry.BannedUntil <= nowNs {
+		return
+	}
+	if lastAccessNs <= 0 {
+		lastAccessNs = nowNs
+	}
+	key := domainKey(domain)
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	idx, found := t.findLocked(key)
+	if !found {
+		idx = t.pickSlotLocked()
+	}
+	t.slots[idx] = destBanSlot{
+		key:          key,
+		domain:       domain,
+		entry:        entry,
+		occupied:     true,
+		lastAccessNs: lastAccessNs,
+	}
+}
+
+// Lookup returns a snapshot for domain when the slot is occupied.
+// // safe for concurrent calls
+func (t *DestBanTable) Lookup(domain string) (DestBanSnapshot, bool) {
+	if t == nil || domain == "" {
+		return DestBanSnapshot{}, false
+	}
+	key := domainKey(domain)
+	nowNs := time.Now().UnixNano()
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	idx, found := t.findLocked(key)
+	if !found {
+		return DestBanSnapshot{}, false
+	}
+	e := t.slots[idx].entry
+	if e.BannedUntil > 0 && e.BannedUntil <= nowNs {
+		t.slots[idx].occupied = false
+		return DestBanSnapshot{}, false
+	}
+	return DestBanSnapshot{
+		Domain:       t.slots[idx].domain,
+		Entry:        e,
+		Active:       e.BannedUntil > nowNs,
+		LastAccessNs: t.slots[idx].lastAccessNs,
+	}, true
 }
 
 // Clear removes the dest-ban / failure counter for domain.

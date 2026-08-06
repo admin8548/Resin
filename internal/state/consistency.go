@@ -15,7 +15,8 @@ import (
 //  2. nodes_static: remove entries with no remaining non-evicted reference in subscription_nodes.
 //  3. nodes_dynamic: remove entries whose hash is missing from nodes_static.
 //  4. node_latency: remove entries whose node_hash is missing from nodes_static.
-//  5. leases: remove entries whose platform_id is missing from state.platforms
+//  5. node_dest_ban: remove entries whose node_hash is missing from nodes_static.
+//  6. leases: remove entries whose platform_id is missing from state.platforms
 //     OR whose node_hash is missing from nodes_static.
 func RepairConsistency(stateDBPath string, cacheDB *sql.DB) error {
 	// ATTACH state.db so we can cross-query.
@@ -49,7 +50,11 @@ func RepairConsistency(stateDBPath string, cacheDB *sql.DB) error {
 		`DELETE FROM node_latency
 		 WHERE node_hash NOT IN (SELECT hash FROM nodes_static)`,
 
-		// 5. leases: orphan platform or orphan node
+		// 5. node_dest_ban: orphan to nodes_static
+		`DELETE FROM node_dest_ban
+		 WHERE node_hash NOT IN (SELECT hash FROM nodes_static)`,
+
+		// 6. leases: orphan platform or orphan node
 		`DELETE FROM leases
 		 WHERE platform_id NOT IN (SELECT id FROM state_db.platforms)
 		    OR node_hash NOT IN (SELECT hash FROM nodes_static)`,

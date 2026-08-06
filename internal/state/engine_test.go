@@ -374,3 +374,47 @@ func TestEngine_ConcurrentMarkAndFlush(t *testing.T) {
 		t.Fatalf("expected 100 nodes, got %d (some lost in concurrent flush)", len(nodes))
 	}
 }
+
+func TestFlushDirtySets_NodeDestBanSurvivesRestart(t *testing.T) {
+	engine, _, _ := newTestEngine(t)
+
+	until := time.Now().Add(time.Hour).UnixNano()
+	store := map[model.NodeDestBanKey]*model.NodeDestBan{
+		{NodeHash: "n1", Domain: "grok.com"}: {
+			NodeHash:      "n1",
+			Domain:        "grok.com",
+			FailCount:     2,
+			BannedUntilNs: until,
+			LastError:     "UPSTREAM_CONNECT_FAILED",
+			LastFailAtNs:  time.Now().UnixNano(),
+			LastAccessNs:  time.Now().UnixNano(),
+		},
+	}
+	readers := CacheReaders{
+		ReadNodeDestBan: func(k NodeDestBanDirtyKey) *model.NodeDestBan { return store[k] },
+	}
+	engine.MarkNodeDestBan("n1", "grok.com")
+	if err := engine.FlushDirtySets(readers); err != nil {
+		t.Fatalf("flush: %v", err)
+	}
+	rows, err := engine.LoadAllNodeDestBan()
+	if err != nil {
+		t.Fatalf("load: %v", err)
+	}
+	if len(rows) != 1 || rows[0].Domain != "grok.com" || rows[0].FailCount != 2 || rows[0].BannedUntilNs != until {
+		t.Fatalf("unexpected rows: %+v", rows)
+	}
+
+	// delete path
+	engine.MarkNodeDestBanDelete("n1", "grok.com")
+	if err := engine.FlushDirtySets(readers); err != nil {
+		t.Fatalf("flush delete: %v", err)
+	}
+	rows, err = engine.LoadAllNodeDestBan()
+	if err != nil {
+		t.Fatalf("load after delete: %v", err)
+	}
+	if len(rows) != 0 {
+		t.Fatalf("want empty after delete, got %+v", rows)
+	}
+}

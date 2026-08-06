@@ -184,6 +184,61 @@ func (r *CacheRepo) LoadAllNodeLatency() ([]model.NodeLatency, error) {
 	return result, rows.Err()
 }
 
+// --- node_dest_ban ---
+
+// BulkUpsertNodeDestBan batch-inserts or updates dest-ban records.
+func (r *CacheRepo) BulkUpsertNodeDestBan(entries []model.NodeDestBan) error {
+	return bulkExecRows(
+		r,
+		upsertNodeDestBanSQL,
+		entries,
+		func(stmt *sql.Stmt, e model.NodeDestBan) error {
+			_, err := stmt.Exec(
+				e.NodeHash, e.Domain, e.FailCount, e.BannedUntilNs,
+				e.LastError, e.LastFailAtNs, e.LastAccessNs,
+			)
+			return err
+		},
+	)
+}
+
+// BulkDeleteNodeDestBan batch-deletes dest-ban records by composite key.
+func (r *CacheRepo) BulkDeleteNodeDestBan(keys []model.NodeDestBanKey) error {
+	return bulkExecRows(
+		r,
+		deleteNodeDestBanSQL,
+		keys,
+		func(stmt *sql.Stmt, key model.NodeDestBanKey) error {
+			_, err := stmt.Exec(key.NodeHash, key.Domain)
+			return err
+		},
+	)
+}
+
+// LoadAllNodeDestBan reads all dest-ban records.
+func (r *CacheRepo) LoadAllNodeDestBan() ([]model.NodeDestBan, error) {
+	rows, err := r.db.Query(`
+		SELECT node_hash, domain, fail_count, banned_until_ns, last_error, last_fail_at_ns, last_access_ns
+		FROM node_dest_ban`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var result []model.NodeDestBan
+	for rows.Next() {
+		var e model.NodeDestBan
+		if err := rows.Scan(
+			&e.NodeHash, &e.Domain, &e.FailCount, &e.BannedUntilNs,
+			&e.LastError, &e.LastFailAtNs, &e.LastAccessNs,
+		); err != nil {
+			return nil, err
+		}
+		result = append(result, e)
+	}
+	return result, rows.Err()
+}
+
 // --- leases ---
 
 // BulkUpsertLeases batch-inserts or updates lease records.
@@ -350,14 +405,16 @@ type FlushOps struct {
 	DeleteNodesDynamic      []string
 	UpsertNodeLatency       []model.NodeLatency
 	DeleteNodeLatency       []model.NodeLatencyKey
+	UpsertNodeDestBan       []model.NodeDestBan
+	DeleteNodeDestBan       []model.NodeDestBanKey
 	UpsertLeases            []model.Lease
 	DeleteLeases            []model.LeaseKey
 }
 
 // FlushTx executes all upserts and deletes in a single transaction.
 //
-// Upsert order: nodes_static → subscription_nodes → nodes_dynamic → node_latency → leases
-// Delete order: leases → node_latency → nodes_dynamic → subscription_nodes → nodes_static
+// Upsert order: nodes_static → subscription_nodes → nodes_dynamic → node_latency → node_dest_ban → leases
+// Delete order: leases → node_dest_ban → node_latency → nodes_dynamic → subscription_nodes → nodes_static
 func (r *CacheRepo) FlushTx(ops FlushOps) error {
 	tx, err := r.db.Begin()
 	if err != nil {
@@ -406,6 +463,11 @@ func (r *CacheRepo) FlushTx(ops FlushOps) error {
 			_, err := s.Exec(e.NodeHash, e.Domain, e.EwmaNs, e.LastUpdatedNs)
 			return err
 		}},
+		{"upsert_node_dest_ban", upsertNodeDestBanSQL, len(ops.UpsertNodeDestBan), func(s *sql.Stmt, i int) error {
+			e := ops.UpsertNodeDestBan[i]
+			_, err := s.Exec(e.NodeHash, e.Domain, e.FailCount, e.BannedUntilNs, e.LastError, e.LastFailAtNs, e.LastAccessNs)
+			return err
+		}},
 		{"upsert_leases", upsertLeasesSQL, len(ops.UpsertLeases), func(s *sql.Stmt, i int) error {
 			l := ops.UpsertLeases[i]
 			_, err := s.Exec(l.PlatformID, l.Account, l.NodeHash, l.EgressIP, l.CreatedAtNs, l.ExpiryNs, l.LastAccessedNs)
@@ -418,6 +480,10 @@ func (r *CacheRepo) FlushTx(ops FlushOps) error {
 		}},
 		{"delete_node_latency", deleteNodeLatencySQL, len(ops.DeleteNodeLatency), func(s *sql.Stmt, i int) error {
 			_, err := s.Exec(ops.DeleteNodeLatency[i].NodeHash, ops.DeleteNodeLatency[i].Domain)
+			return err
+		}},
+		{"delete_node_dest_ban", deleteNodeDestBanSQL, len(ops.DeleteNodeDestBan), func(s *sql.Stmt, i int) error {
+			_, err := s.Exec(ops.DeleteNodeDestBan[i].NodeHash, ops.DeleteNodeDestBan[i].Domain)
 			return err
 		}},
 		{"delete_nodes_dynamic", deleteNodesDynamicSQL, len(ops.DeleteNodesDynamic), func(s *sql.Stmt, i int) error {
@@ -472,6 +538,17 @@ const (
 			ewma_ns         = excluded.ewma_ns,
 			last_updated_ns = excluded.last_updated_ns`
 
+	upsertNodeDestBanSQL = `INSERT INTO node_dest_ban (
+			node_hash, domain, fail_count, banned_until_ns, last_error, last_fail_at_ns, last_access_ns
+		)
+		 VALUES (?, ?, ?, ?, ?, ?, ?)
+		 ON CONFLICT(node_hash, domain) DO UPDATE SET
+			fail_count      = excluded.fail_count,
+			banned_until_ns = excluded.banned_until_ns,
+			last_error      = excluded.last_error,
+			last_fail_at_ns = excluded.last_fail_at_ns,
+			last_access_ns  = excluded.last_access_ns`
+
 	upsertLeasesSQL = `INSERT INTO leases (platform_id, account, node_hash, egress_ip, created_at_ns, expiry_ns, last_accessed_ns)
 		 VALUES (?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(platform_id, account) DO UPDATE SET
@@ -490,6 +567,7 @@ const (
 	deleteNodesStaticSQL       = "DELETE FROM nodes_static WHERE hash = ?"
 	deleteNodesDynamicSQL      = "DELETE FROM nodes_dynamic WHERE hash = ?"
 	deleteNodeLatencySQL       = "DELETE FROM node_latency WHERE node_hash = ? AND domain = ?"
+	deleteNodeDestBanSQL       = "DELETE FROM node_dest_ban WHERE node_hash = ? AND domain = ?"
 	deleteLeasesSQL            = "DELETE FROM leases WHERE platform_id = ? AND account = ?"
 	deleteSubscriptionNodesSQL = "DELETE FROM subscription_nodes WHERE subscription_id = ? AND node_hash = ?"
 )
