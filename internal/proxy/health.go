@@ -18,13 +18,27 @@ type passiveHealthRecorder interface {
 	RecordPassiveResult(platformID string, hash node.Hash, success bool, domain string)
 }
 
+// recordPassiveResultAsync reports passive health after a proxy attempt.
+// Failures are recorded synchronously so dest-ban / circuit state is visible
+// to the next route pick (threshold=1 must take effect before the following request).
+// Successes stay async to avoid adding latency on the common path.
+// Concurrent in-flight requests that both routed before either finished can still
+// double-hit the same node once; that is inherent to route-then-dial.
 func recordPassiveResultAsync(health HealthRecorder, route routing.RouteResult, success bool) {
 	if health == nil {
 		return
 	}
 	if recorder, ok := health.(passiveHealthRecorder); ok {
-		go recorder.RecordPassiveResult(route.PlatformID, route.NodeHash, success, route.TargetDomain)
+		if !success {
+			recorder.RecordPassiveResult(route.PlatformID, route.NodeHash, false, route.TargetDomain)
+			return
+		}
+		go recorder.RecordPassiveResult(route.PlatformID, route.NodeHash, true, route.TargetDomain)
 		return
 	}
-	go health.RecordResult(route.NodeHash, success)
+	if !success {
+		health.RecordResult(route.NodeHash, false)
+		return
+	}
+	go health.RecordResult(route.NodeHash, true)
 }
